@@ -1,0 +1,49 @@
+# Local model weights
+*.gguf
+*.bin
+*.safetensors
+*.mlx
+*.mlmodel
+*.pt
+*.pth
+*.onnx
+weights/
+models/weights/
+
+# Inbox (GLBs waiting for import)
+inbox/
+inbox/**
+
+# Job logs and runtime job files (live under user://, but ignore any checked-in copies)
+**/jobs/*.json
+**/jobs/*.log
+user://
+
+# Live-check probe artifacts (created by live_execute_check)
+agent_probe_scene.tscn
+agent_probe_broken.gd
+agent_probe_broken.gd.uid
+agent_probe_ready.gd
+agent_probe_ready.gd.uid
+
+# Agentic session frames; keep local jsonl on disk, do not commit runtime logs
+**/.agentic/**/*.png
+**/.agentic/sessions/*.jsonl
+user://agentic/*.png
+# Play gate temp scene / temporary PlayProbe override
+**/_gate_scene.tscn
+override.cfg
+
+# Godot
+.godot/
+*.translation
+export_presets.cfg
+
+# OS / editor noise
+.DS_Store
+._*
+*~
+*.swp
+.import/
+.mono/
+data_*/

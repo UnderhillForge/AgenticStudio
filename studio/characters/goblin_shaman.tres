@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="AgenticStudioPage" format=3 uid="uid://b0pute2oop2r8"]
+
+[ext_resource type="Script" uid="uid://c87218724apgs" path="res://addons/agentic_studio/page.gd" id="1_1m07i"]
+
+[resource]
+script = ExtResource("1_1m07i")
+title = "Goblin Shaman"
+notes = "The Goblin Shaman carries a bone staff and speaks in swamp-smoke riddles."
+tags = PackedStringArray("goblin", "shaman")
+image_paths = PackedStringArray("res://studio/characters/goblin_shaman_images/icon.svg")
+links = PackedStringArray()
