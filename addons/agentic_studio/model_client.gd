@@ -6,17 +6,18 @@ const SceneToolsScript = preload("res://addons/agentic_studio/scene_tools.gd")
 const ShotSupportScript = preload("res://addons/agentic_studio/screenshot_support.gd")
 
 const PLAN_SYSTEM_PROMPT: String = (
-	"You are planning only for AgenticStudio inside the Godot editor. "
+	"You are the AgenticStudio planner. You do not apply ops and you never write "
+	+ "scenes, project.godot, or autoloads. "
 	+ "You may call list_pages, get_page, list_dir, read_file, screenshot, and check_page_drift "
 	+ "to inspect pages, text files under res://, editor/game views, and page/scene drift. "
 	+ "Pages are .tres files under res://studio/characters/ and res://studio/assets/. "
 	+ "Prefer get_page with the page title string (for example Goblin Shaman). "
 	+ "screenshot target is editor_2d, editor_3d, or play (play needs a running game). "
-	+ "Do not call write_file, delete_file, link, create_asset, or any scene write tools. "
-	+ "Describe the steps you would take to satisfy the user request. "
-	+ "Do not claim you edited the project, changed any scene, wrote any file, "
-	+ "or performed any action. When asked what is on a page, call get_page and quote the notes. "
-	+ "Planning text only beyond those read/screenshot/drift tools."
+	+ "Do not call write_file, delete_file, link, create_asset, add_node, set_property, "
+	+ "or any other write tool — those replies are discarded. "
+	+ "Your plan MUST name: (1) page_id, (2) the intended op for the coder, "
+	+ "(3) the play check that counts as done. "
+	+ "Do not claim you edited the project or performed any write."
 )
 
 const EXECUTE_SYSTEM_PROMPT: String = (
@@ -51,9 +52,11 @@ static func build_headers(model: Dictionary) -> PackedStringArray:
 		"Content-Type: application/json",
 		"Accept: application/json",
 	])
-	var api_key: String = str(model.get("api_key", "")).strip_edges()
-	if not api_key.is_empty():
-		headers.append("Authorization: Bearer %s" % api_key)
+	# Bearer only for kind=external. Local planners/coders never send Authorization.
+	if str(model.get("kind", "")) == AgenticStudioConfig.KIND_EXTERNAL:
+		var api_key: String = str(model.get("api_key", "")).strip_edges()
+		if not api_key.is_empty():
+			headers.append("Authorization: Bearer %s" % api_key)
 	return headers
 
 
@@ -92,19 +95,37 @@ static func build_chat_body(
 	return JSON.stringify(payload)
 
 
-static func validate_model_endpoint(model: Dictionary) -> Dictionary:
-	var base_url: String = str(model.get("base_url", "")).strip_edges()
-	if base_url.is_empty():
-		return {"ok": false, "error": "Selected model has no base URL"}
-	var model_name: String = str(model.get("model_name", "")).strip_edges()
-	if model_name.is_empty():
-		return {"ok": false, "error": "Selected model has no model name"}
+static func validate_model_endpoint(model: Dictionary, expected_role: String = "") -> Dictionary:
+	var checked: Dictionary = AgenticStudioConfig.validate_role_endpoint(model, expected_role)
+	if not bool(checked.get("ok", false)):
+		return {"ok": false, "error": str(checked.get("error", "")), "url": "", "headers": PackedStringArray()}
+	var base_url: String = str(checked.get("base_url", ""))
 	return {
 		"ok": true,
 		"error": "",
 		"url": completions_url(base_url),
 		"headers": build_headers(model),
 	}
+
+
+## True when a planner reply tried to write (discard — never apply).
+static func planner_response_has_write(content: String, tool_calls: Array) -> bool:
+	for call_v: Variant in tool_calls:
+		if typeof(call_v) != TYPE_DICTIONARY:
+			continue
+		var fn: Dictionary = (call_v as Dictionary).get("function", {})
+		var name: String = str(fn.get("name", ""))
+		if AgenticStudioSceneTools.is_write_tool(name):
+			return true
+		if not AgenticStudioSceneTools.is_plan_tool(name) and name in [
+			"add_node", "set_property", "write_file", "delete_file", "create_asset", "link"
+		]:
+			return true
+	var lower: String = content.to_lower()
+	for marker: String in ['"write_file"', '"delete_file"', '"add_node"', '"set_property"', '"create_asset"']:
+		if lower.find(marker) >= 0:
+			return true
+	return false
 
 
 static func build_plan_request(model: Dictionary, user_prompt: String) -> Dictionary:

@@ -39,7 +39,8 @@ var _tab_context_menu: PopupMenu
 var _studio_panel: Control
 var _studio_log: TextEdit
 var _studio_prompt: TextEdit
-var _studio_model: OptionButton
+var _studio_planner: OptionButton
+var _studio_coder: OptionButton
 var _studio_mode: OptionButton
 var _studio_settings: Button
 var _studio_send: Button
@@ -48,9 +49,10 @@ var _studio_jobs: Array[AgenticStudioJob] = []
 var _studio_transcript: RefCounted = null  ## AgenticStudioSessionTranscript
 
 # Session tabs: parallel to TabBar indices 1..n
-# Each entry: panel, log, prompt, model, mode, settings, send, job, title, transcript
+# Each entry: panel, log, prompt, planner, coder, mode, settings, send, job, title, transcript
 var _sessions: Array[Dictionary] = []
-var _model_ids: PackedStringArray = PackedStringArray()
+var _planner_ids: PackedStringArray = PackedStringArray()
+var _coder_ids: PackedStringArray = PackedStringArray()
 var _job_running: bool = false
 var _suppress_picker_signal: bool = false
 var _suppress_tab_signal: bool = false
@@ -161,7 +163,8 @@ func _build_studio_panel() -> Control:
 		Callable(self, "_on_studio_send_pressed")
 	)
 	_studio_prompt = composer["prompt"]
-	_studio_model = composer["model"]
+	_studio_planner = composer["planner"]
+	_studio_coder = composer["coder"]
 	_studio_mode = composer["mode"]
 	_studio_settings = composer["settings"]
 	_studio_send = composer["send"]
@@ -316,15 +319,25 @@ func _build_composer(prompt_name: String, send_cb: Callable) -> Dictionary:
 	toolbar.custom_minimum_size = Vector2(0, 0)
 	root.add_child(toolbar)
 
-	var model_label := Label.new()
-	model_label.text = "Model"
-	toolbar.add_child(model_label)
+	var planner_label := Label.new()
+	planner_label.text = "Planner"
+	toolbar.add_child(planner_label)
 
-	var model_picker := OptionButton.new()
-	model_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	model_picker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	model_picker.item_selected.connect(_on_model_selected)
-	toolbar.add_child(model_picker)
+	var planner_picker := OptionButton.new()
+	planner_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	planner_picker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	planner_picker.item_selected.connect(_on_planner_selected)
+	toolbar.add_child(planner_picker)
+
+	var coder_label := Label.new()
+	coder_label.text = "Coder"
+	toolbar.add_child(coder_label)
+
+	var coder_picker := OptionButton.new()
+	coder_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	coder_picker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	coder_picker.item_selected.connect(_on_coder_selected)
+	toolbar.add_child(coder_picker)
 
 	var mode_label := Label.new()
 	mode_label.text = "Mode"
@@ -355,7 +368,8 @@ func _build_composer(prompt_name: String, send_cb: Callable) -> Dictionary:
 		"root": root,
 		"prompt": prompt,
 		"toolbar": toolbar,
-		"model": model_picker,
+		"planner": planner_picker,
+		"coder": coder_picker,
 		"mode": mode_picker,
 		"settings": settings_btn,
 		"send": send_btn,
@@ -406,7 +420,8 @@ func _make_session_panel(
 		"panel": panel,
 		"log": log_view,
 		"prompt": composer["prompt"],
-		"model": composer["model"],
+		"planner": composer["planner"],
+		"coder": composer["coder"],
 		"mode": composer["mode"],
 		"settings": composer["settings"],
 		"send": composer["send"],
@@ -601,7 +616,7 @@ func _close_session_tab(tab: int) -> void:
 		_session_seq = 2
 		var blank: Dictionary = _make_session_panel(title, null, null)
 		_sessions.append(blank)
-		_fill_model_picker(blank["model"] as OptionButton)
+		_fill_role_pickers(blank["planner"] as OptionButton, blank["coder"] as OptionButton)
 		(blank["transcript"] as RefCounted).save()
 		_suppress_tab_signal = true
 		_tab_bar.add_tab(title)
@@ -638,22 +653,26 @@ func _show_tab_content(tab: int) -> void:
 
 func _on_plus_pressed() -> void:
 	var mode_idx: int = 0
-	var model_idx: int = 0
+	var planner_idx: int = 0
+	var coder_idx: int = 0
 	var current: int = _tab_bar.current_tab
 	if current == TAB_STUDIO:
 		mode_idx = _studio_mode.selected
-		model_idx = _studio_model.selected
+		planner_idx = _studio_planner.selected
+		coder_idx = _studio_coder.selected
 	elif current >= 1 and current - 1 < _sessions.size():
 		var src: Dictionary = _sessions[current - 1]
 		mode_idx = (src["mode"] as OptionButton).selected
-		model_idx = (src["model"] as OptionButton).selected
+		planner_idx = (src["planner"] as OptionButton).selected
+		coder_idx = (src["coder"] as OptionButton).selected
 
 	var title: String = "Session %d" % _session_seq
 	_session_seq += 1
 	var entry: Dictionary = _make_session_panel(title, null, null)
 	_sessions.append(entry)
-	_fill_model_picker(entry["model"] as OptionButton)
-	(entry["model"] as OptionButton).select(model_idx)
+	_fill_role_pickers(entry["planner"] as OptionButton, entry["coder"] as OptionButton)
+	(entry["planner"] as OptionButton).select(planner_idx)
+	(entry["coder"] as OptionButton).select(coder_idx)
 	(entry["mode"] as OptionButton).select(mode_idx)
 	(entry["transcript"] as RefCounted).save()
 
@@ -710,7 +729,7 @@ func _reload_jobs_into_tabs() -> void:
 		_session_seq += 1
 		var entry: Dictionary = _make_session_panel(title, tr, null)
 		_sessions.append(entry)
-		_fill_model_picker(entry["model"] as OptionButton)
+		_fill_role_pickers(entry["planner"] as OptionButton, entry["coder"] as OptionButton)
 		_suppress_tab_signal = true
 		_tab_bar.add_tab(str(entry["title"]))
 		_suppress_tab_signal = false
@@ -720,7 +739,7 @@ func _reload_jobs_into_tabs() -> void:
 		_session_seq = 2
 		var blank: Dictionary = _make_session_panel(title, null, null)
 		_sessions.append(blank)
-		_fill_model_picker(blank["model"] as OptionButton)
+		_fill_role_pickers(blank["planner"] as OptionButton, blank["coder"] as OptionButton)
 		(blank["transcript"] as RefCounted).save()
 		_suppress_tab_signal = true
 		_tab_bar.add_tab(title)
@@ -781,7 +800,8 @@ func _on_studio_send_pressed() -> void:
 	await _send_from(
 		AgenticStudioJob.CHANNEL_STUDIO,
 		_studio_prompt,
-		_studio_model,
+		_studio_planner,
+		_studio_coder,
 		_studio_mode,
 		-1
 	)
@@ -805,16 +825,27 @@ func _on_session_send_pressed(session_i: int) -> void:
 	await _send_from(
 		AgenticStudioJob.CHANNEL_SESSION,
 		entry["prompt"] as TextEdit,
-		entry["model"] as OptionButton,
+		entry["planner"] as OptionButton,
+		entry["coder"] as OptionButton,
 		entry["mode"] as OptionButton,
 		session_i
 	)
 
 
+func _id_from_role_picker(picker: OptionButton, ids: PackedStringArray) -> String:
+	if picker == null or picker.selected <= 0:
+		return ""
+	var idx: int = picker.selected - 1
+	if idx < 0 or idx >= ids.size():
+		return ""
+	return ids[idx]
+
+
 func _send_from(
 	channel: String,
 	prompt_edit: TextEdit,
-	model_picker: OptionButton,
+	planner_picker: OptionButton,
+	coder_picker: OptionButton,
 	mode_picker: OptionButton,
 	session_i: int
 ) -> void:
@@ -823,30 +854,29 @@ func _send_from(
 		_status_line.text = "Enter a prompt before sending. · %s" % _blender_status_fragment()
 		return
 
-	var selected_id: String = AgenticStudioConfig.get_selected_model_id()
-	# Prefer the picker on this composer if it has a selection.
-	if model_picker.selected > 0 and model_picker.selected - 1 < _model_ids.size():
-		selected_id = _model_ids[model_picker.selected - 1]
-		AgenticStudioConfig.set_selected_model_id(selected_id)
-
-	if selected_id.is_empty():
-		_status_line.text = "No model selected — nothing written. · %s" % _blender_status_fragment()
-		return
-
-	var model: Dictionary = AgenticStudioConfig.get_model(selected_id)
-	if model.is_empty():
-		_status_line.text = "No model selected — nothing written. · %s" % _blender_status_fragment()
-		return
-
-	var base_url: String = str(model.get("base_url", "")).strip_edges()
-	if base_url.is_empty():
-		_status_line.text = (
-			"Selected model has no base URL — nothing written. · %s"
-			% _blender_status_fragment()
-		)
-		return
+	# Persist picker selections into config (no role fallback).
+	var planner_id: String = _id_from_role_picker(planner_picker, _planner_ids)
+	var coder_id: String = _id_from_role_picker(coder_picker, _coder_ids)
+	if not planner_id.is_empty():
+		AgenticStudioConfig.set_selected_planner_id(planner_id)
+	if not coder_id.is_empty():
+		AgenticStudioConfig.set_selected_coder_id(coder_id)
 
 	var mode: String = AgenticStudioJob.mode_from_index(mode_picker.selected)
+	var use_planner: bool = mode == AgenticStudioJob.MODE_PLAN
+	var selected_id: String = planner_id if use_planner else coder_id
+	var expected_role: String = (
+		AgenticStudioConfig.ROLE_PLANNER if use_planner else AgenticStudioConfig.ROLE_CODER
+	)
+	var model: Dictionary = AgenticStudioConfig.get_model(selected_id)
+	var checked: Dictionary = AgenticStudioConfig.validate_role_endpoint(model, expected_role)
+	if not bool(checked.get("ok", false)):
+		_status_line.text = "%s — nothing written. · %s" % [
+			str(checked.get("error", "model invalid")),
+			_blender_status_fragment(),
+		]
+		return
+
 	_set_job_running(true)
 
 	var job := AgenticStudioJob.new()
@@ -855,7 +885,10 @@ func _send_from(
 	job.mode = mode
 	job.channel = channel
 	job.stage = AgenticStudioJob.STAGE_RUNNING
-	job.append_log("Job created.")
+	job.append_log("Job created (%s: %s)." % [
+		expected_role,
+		str(model.get("display_name", selected_id)),
+	])
 	job.save()
 
 	prompt_edit.text = ""
@@ -1206,83 +1239,121 @@ func _on_images_dropped(paths: PackedStringArray) -> void:
 		EditorInterface.get_resource_filesystem().scan()
 
 
-func _on_model_selected(index: int) -> void:
+func _on_planner_selected(index: int) -> void:
 	if _suppress_picker_signal:
 		return
-	if index <= 0 or index - 1 >= _model_ids.size():
-		AgenticStudioConfig.set_selected_model_id("")
+	if index <= 0 or index - 1 >= _planner_ids.size():
+		AgenticStudioConfig.set_selected_planner_id("")
 	else:
-		AgenticStudioConfig.set_selected_model_id(_model_ids[index - 1])
-	_sync_model_pickers_to_config()
+		AgenticStudioConfig.set_selected_planner_id(_planner_ids[index - 1])
+	_sync_role_pickers_to_config()
 	_update_status_line()
 
 
-func _fill_model_picker(picker: OptionButton) -> void:
+func _on_coder_selected(index: int) -> void:
+	if _suppress_picker_signal:
+		return
+	if index <= 0 or index - 1 >= _coder_ids.size():
+		AgenticStudioConfig.set_selected_coder_id("")
+	else:
+		AgenticStudioConfig.set_selected_coder_id(_coder_ids[index - 1])
+	_sync_role_pickers_to_config()
+	_update_status_line()
+
+
+func _fill_role_pickers(planner_picker: OptionButton, coder_picker: OptionButton) -> void:
 	_suppress_picker_signal = true
+	_planner_ids = PackedStringArray()
+	_coder_ids = PackedStringArray()
+	_fill_one_role_picker(
+		planner_picker,
+		AgenticStudioConfig.ROLE_PLANNER,
+		AgenticStudioConfig.get_selected_planner_id(),
+		_planner_ids
+	)
+	_fill_one_role_picker(
+		coder_picker,
+		AgenticStudioConfig.ROLE_CODER,
+		AgenticStudioConfig.get_selected_coder_id(),
+		_coder_ids
+	)
+	_suppress_picker_signal = false
+
+
+func _fill_one_role_picker(
+	picker: OptionButton,
+	role: String,
+	selected_id: String,
+	ids_out: PackedStringArray
+) -> void:
 	picker.clear()
-	picker.add_item("No model selected", 0)
-	var models: Array[Dictionary] = AgenticStudioConfig.list_models()
-	var selected_id: String = AgenticStudioConfig.get_selected_model_id()
+	picker.add_item("None", 0)
 	var select_index: int = 0
-	_model_ids = PackedStringArray()
+	var models: Array[Dictionary] = AgenticStudioConfig.list_models_for_role(role)
 	for i: int in range(models.size()):
 		var model: Dictionary = models[i]
 		var id: String = str(model.get("id", ""))
-		_model_ids.append(id)
+		ids_out.append(id)
 		var kind: String = str(model.get("kind", "local"))
 		var label: String = "%s (%s)" % [str(model.get("display_name", id)), kind]
 		picker.add_item(label, i + 1)
 		if id == selected_id:
 			select_index = i + 1
 	picker.select(select_index)
-	_suppress_picker_signal = false
 
 
 func _refresh_all_model_pickers() -> void:
-	_fill_model_picker(_studio_model)
+	_fill_role_pickers(_studio_planner, _studio_coder)
 	for entry: Dictionary in _sessions:
-		_fill_model_picker(entry["model"] as OptionButton)
+		_fill_role_pickers(entry["planner"] as OptionButton, entry["coder"] as OptionButton)
 
 
-func _sync_model_pickers_to_config() -> void:
-	var selected_id: String = AgenticStudioConfig.get_selected_model_id()
-	var select_index: int = 0
-	for i: int in range(_model_ids.size()):
-		if _model_ids[i] == selected_id:
-			select_index = i + 1
+func _sync_role_pickers_to_config() -> void:
+	var planner_id: String = AgenticStudioConfig.get_selected_planner_id()
+	var coder_id: String = AgenticStudioConfig.get_selected_coder_id()
+	var planner_i: int = 0
+	var coder_i: int = 0
+	for i: int in range(_planner_ids.size()):
+		if _planner_ids[i] == planner_id:
+			planner_i = i + 1
+			break
+	for j: int in range(_coder_ids.size()):
+		if _coder_ids[j] == coder_id:
+			coder_i = j + 1
 			break
 	_suppress_picker_signal = true
-	_studio_model.select(select_index)
+	_studio_planner.select(planner_i)
+	_studio_coder.select(coder_i)
 	for entry: Dictionary in _sessions:
-		(entry["model"] as OptionButton).select(select_index)
+		(entry["planner"] as OptionButton).select(planner_i)
+		(entry["coder"] as OptionButton).select(coder_i)
 	_suppress_picker_signal = false
 
 
 func _update_status_line() -> void:
-	var selected_id: String = AgenticStudioConfig.get_selected_model_id()
-	var model_text: String = "No model selected"
-	if not selected_id.is_empty():
-		var model: Dictionary = AgenticStudioConfig.get_model(selected_id)
-		if model.is_empty():
-			model_text = "No model selected"
-		else:
-			model_text = "Model: %s (%s)" % [
-				str(model.get("display_name", selected_id)),
-				str(model.get("kind", "")),
-			]
+	var planner: Dictionary = AgenticStudioConfig.get_selected_planner()
+	var coder: Dictionary = AgenticStudioConfig.get_selected_coder()
+	var planner_text: String = "Planner: none"
+	if not planner.is_empty():
+		planner_text = "Planner: %s" % str(planner.get("display_name", planner.get("id", "")))
+	var coder_text: String = "Coder: none"
+	if not coder.is_empty():
+		coder_text = "Coder: %s" % str(coder.get("display_name", coder.get("id", "")))
 	var blender: String = AgenticStudioConfig.get_blender_path()
 	var blender_text: String = "Blender path set" if not blender.is_empty() else "Blender path not set"
-	_status_line.text = "%s · %s" % [model_text, blender_text]
+	_status_line.text = "%s · %s · %s" % [planner_text, coder_text, blender_text]
 
 
 func _update_controls_enabled() -> void:
 	var disabled: bool = _job_running
-	_studio_model.disabled = disabled
+	_studio_planner.disabled = disabled
+	_studio_coder.disabled = disabled
 	_studio_mode.disabled = disabled
 	_studio_send.disabled = disabled
 	_plus_btn.disabled = disabled
 	for entry: Dictionary in _sessions:
-		(entry["model"] as OptionButton).disabled = disabled
+		(entry["planner"] as OptionButton).disabled = disabled
+		(entry["coder"] as OptionButton).disabled = disabled
 		(entry["mode"] as OptionButton).disabled = disabled
 		(entry["send"] as Button).disabled = disabled
 
@@ -1312,14 +1383,39 @@ func _session_id_for_job(job: AgenticStudioJob) -> String:
 
 
 func _run_plan(job: AgenticStudioJob, model: Dictionary) -> void:
-	## Plan may call list_pages / get_page / list_dir / read_file / screenshot. No writes.
+	## Planner only. No apply API, no scene writes. Discard any write-shaped reply.
 	var tools := AgenticStudioSceneTools.new()
 	tools.setup(job.id, _session_id_for_job(job))
+	var budget: int = AgenticStudioContextBudget.resolve_budget(model)
+	var session_lines: PackedStringArray = AgenticStudioSessionLog.read_recent_lines(40)
+	var packed: Dictionary = AgenticStudioContextBudget.pack(
+		{
+			"system": AgenticStudioModelClient.PLAN_SYSTEM_PROMPT,
+			"op_schema": "Plan fields: page_id, intended_op, play_check_done.",
+			"page_id": "(planner must name page_id)",
+			"last_play_error": "",
+			"prompt": job.prompt,
+		},
+		session_lines,
+		PackedStringArray(),
+		budget
+	)
+	if not bool(packed.get("ok", false)):
+		job.append_log(str(packed.get("error", "context budget exceeded")))
+		job.stage = AgenticStudioJob.STAGE_FAILED
+		job.save()
+		return
 	var messages: Array = AgenticStudioModelClient.initial_plan_messages(job.prompt)
+	var extra: String = str(packed.get("messages_user_extra", ""))
+	if not extra.is_empty() and messages.size() >= 2:
+		var user_msg: Dictionary = messages[1]
+		user_msg["content"] = str(user_msg.get("content", "")) + "\n\n" + extra
+		messages[1] = user_msg
 	var round_i: int = 0
+	var plan_ops: Array = []
 
 	while round_i < AgenticStudioModelClient.MAX_TOOL_ROUNDS:
-		job.append_log("Calling model for plan…")
+		job.append_log("Calling planner…")
 		job.save()
 		_refresh_job_view(job)
 		AgenticStudioModelClient.apply_pending_shots(messages, model, tools)
@@ -1329,12 +1425,24 @@ func _run_plan(job: AgenticStudioJob, model: Dictionary) -> void:
 			job.append_log(str(response.get("error", "plan request failed")))
 			job.stage = AgenticStudioJob.STAGE_FAILED
 			job.save()
+			AgenticStudioSessionLog.append_plan_or_run(
+				job.model_id, job.mode, tools.cited_page_ids, plan_ops, null, model
+			)
 			return
 
 		var message: Dictionary = response.get("message", {})
-		messages.append(AgenticStudioModelClient.assistant_message_for_history(message))
 		var text: String = str(message.get("content", "")).strip_edges()
 		var tool_calls: Array = message.get("tool_calls", [])
+		if AgenticStudioModelClient.planner_response_has_write(text, tool_calls):
+			job.append_log("Planner write discarded — not applied.")
+			job.stage = AgenticStudioJob.STAGE_FAILED
+			job.save()
+			AgenticStudioSessionLog.append_plan_or_run(
+				job.model_id, job.mode, tools.cited_page_ids, plan_ops, null, model
+			)
+			return
+
+		messages.append(AgenticStudioModelClient.assistant_message_for_history(message))
 		if not text.is_empty() and tool_calls.is_empty():
 			job.append_log(text)
 			job.save()
@@ -1387,6 +1495,7 @@ func _run_plan(job: AgenticStudioJob, model: Dictionary) -> void:
 					outcome = tools.execute(tool_name, args)
 				job.append_log(str(outcome.get("log", "")))
 				result_payload = outcome.get("result", {"ok": false})
+				plan_ops.append({"tool": tool_name, "arguments": args})
 			job.save()
 			_refresh_job_view(job)
 			if from_content:
@@ -1409,6 +1518,9 @@ func _run_plan(job: AgenticStudioJob, model: Dictionary) -> void:
 	if job.stage != AgenticStudioJob.STAGE_FAILED:
 		job.stage = AgenticStudioJob.STAGE_PLANNED
 		job.save()
+	AgenticStudioSessionLog.append_plan_or_run(
+		job.model_id, job.mode, tools.cited_page_ids, plan_ops, null, model
+	)
 
 
 func _run_execute(job: AgenticStudioJob, model: Dictionary, ask_writes: bool) -> void:

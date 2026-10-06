@@ -11,8 +11,8 @@ Godot 4.7 editor plugin that runs Plan / Run / Auto-approve jobs against configu
 
 1. Open this folder as a Godot project (or copy `addons/agentic_studio/` into another game project).
 2. Enable **AgenticStudio** under Project → Project Settings → Plugins.
-3. In the dock, open Settings and add a model (`base_url` + `model_name`). Config lives in `user://agentic_studio.cfg`.
-4. Use **Plan** to inspect pages and files, **Run** to apply edits with confirm, or **Auto-approve** for safe ops (property set / add-child under the scene root).
+3. In Settings: **Add Grok** (cloud planner), **Add Grok Build** (local planner — set its base URL yourself), and a **Local Coder** (Ollama). Config lives only in `user://agentic_studio.cfg`. API keys never go in the repo or session jsonl.
+4. Select one **Planner** and one **Coder** on the dock. **Plan** uses the planner; **Run** / **Auto-approve** and sidecar `run` use the coder. No role fallback.
 
 ## Layout
 
@@ -24,11 +24,15 @@ Godot 4.7 editor plugin that runs Plan / Run / Auto-approve jobs against configu
 | `fixtures/` | Stand-in mesh used by `create_asset` |
 | `dev_docs/` | White paper and build notes |
 
-## Modes
+## Roles and modes
 
+- **Planner** (Grok or Grok Build) — Plan only. Returns `page_id`, intended op, and play check. Never gets the apply API; write-shaped replies are discarded.
+- **Coder** (local Ollama by default) — Run / Auto-approve / sidecar `run`. Emits ops; apply still only through `127.0.0.1:8765`.
 - **Plan** — read-only tools (`list_pages`, `get_page`, `list_dir`, `read_file`, `screenshot`, `check_page_drift`)
 - **Run** — writes ask for confirm; one undo action per job
 - **Auto-approve** — allows safe scene edits; script body, delete, and project settings still ask
+
+Each model row has its own `context_length` budget (defaults: coder 8192, planner 32768). Context trims session jsonl then older page notes; it never trims the op schema, `page_id`, or the last play error, and it never summarizes.
 
 Scene/resource writes require a `page_id`. After scene writes, the play gate parses scripts, plays briefly with a temporary PlayProbe, and returns a structured result (including an optional frame under `user://agentic/`).
 
@@ -39,12 +43,13 @@ Loopback apply API on `127.0.0.1:8765` while the editor is open:
 ```bash
 cd sidecar && uv sync
 uv run agentic-sidecar ping
-uv run agentic-sidecar run \
-  --prompt "…" --base-url http://127.0.0.1:11434/v1 --model qwen2.5-coder:7b \
-  --mode auto_approve --page-id goblin_shaman
+# Uses selected coder from user://agentic_studio.cfg
+uv run agentic-sidecar run --from-config --prompt "…" --page-id goblin_shaman
+# Uses selected planner
+uv run agentic-sidecar plan --from-config --prompt "Quote Goblin Shaman and name page_id"
 ```
 
-`run` asks the model for one op, applies it through the plugin (play gate included), and allows exactly one fix if play fails. See `sidecar/README.md`.
+`run` asks the coder for one op, applies it through the plugin (play gate included), and allows exactly one fix if play fails. See `sidecar/README.md`.
 
 ## License
 

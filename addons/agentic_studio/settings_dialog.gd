@@ -1,24 +1,28 @@
 @tool
 extends AcceptDialog
 ## Model list and tool links. Saves to user://agentic_studio.cfg.
+## Keys stay masked and only in that file — never printed to logs or session jsonl.
 
 signal settings_changed
 
 var _model_list: ItemList
 var _extra_list: ItemList
 var _blender_edit: LineEdit
+var _planner_picker: OptionButton
+var _coder_picker: OptionButton
 var _models: Array[Dictionary] = []
 var _extras: Array[Dictionary] = []
 var _file_dialog: EditorFileDialog
 var _browse_target: String = "" # "blender" | "extra"
 var _browse_extra_index: int = -1
+var _suppress_role_signal: bool = false
 
 
 func _ready() -> void:
 	title = "AgenticStudio Settings"
 	ok_button_text = "Done"
 	dialog_hide_on_ok = true
-	min_size = Vector2i(560, 480)
+	min_size = Vector2i(620, 560)
 	_build_ui()
 	_file_dialog = EditorFileDialog.new()
 	_file_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
@@ -30,7 +34,7 @@ func _ready() -> void:
 
 func open_settings() -> void:
 	_reload_from_disk()
-	popup_centered_ratio(0.5)
+	popup_centered_ratio(0.55)
 
 
 func _build_ui() -> void:
@@ -38,6 +42,32 @@ func _build_ui() -> void:
 	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(root)
+
+	# --- Selected roles ---
+	var role_label := Label.new()
+	role_label.text = "Selected roles"
+	root.add_child(role_label)
+
+	var role_row := HBoxContainer.new()
+	root.add_child(role_row)
+	var planner_lbl := Label.new()
+	planner_lbl.text = "Planner"
+	role_row.add_child(planner_lbl)
+	_planner_picker = OptionButton.new()
+	_planner_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_planner_picker.item_selected.connect(_on_planner_picked)
+	role_row.add_child(_planner_picker)
+
+	var coder_lbl := Label.new()
+	coder_lbl.text = "Coder"
+	role_row.add_child(coder_lbl)
+	_coder_picker = OptionButton.new()
+	_coder_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_coder_picker.item_selected.connect(_on_coder_picked)
+	role_row.add_child(_coder_picker)
+
+	var sep0 := HSeparator.new()
+	root.add_child(sep0)
 
 	# --- Models ---
 	var models_label := Label.new()
@@ -53,8 +83,20 @@ func _build_ui() -> void:
 	var model_buttons := HBoxContainer.new()
 	root.add_child(model_buttons)
 
+	var add_grok_btn := Button.new()
+	add_grok_btn.text = "Add Grok"
+	add_grok_btn.tooltip_text = "Upsert cloud Grok planner (api.x.ai). Key stays in user://."
+	add_grok_btn.pressed.connect(_on_add_grok)
+	model_buttons.add_child(add_grok_btn)
+
+	var add_build_btn := Button.new()
+	add_build_btn.text = "Add Grok Build"
+	add_build_btn.tooltip_text = "Add a local Grok Build planner row (set base_url yourself)."
+	add_build_btn.pressed.connect(_on_add_grok_build)
+	model_buttons.add_child(add_build_btn)
+
 	var add_local_btn := Button.new()
-	add_local_btn.text = "Add Local"
+	add_local_btn.text = "Add Local Coder"
 	add_local_btn.pressed.connect(_on_add_local)
 	model_buttons.add_child(add_local_btn)
 
@@ -134,6 +176,7 @@ func _reload_from_disk() -> void:
 	_extras = AgenticStudioConfig.list_extra_tools()
 	_blender_edit.text = AgenticStudioConfig.get_blender_path()
 	_refresh_model_list()
+	_refresh_role_pickers()
 	_refresh_extra_list()
 
 
@@ -141,12 +184,39 @@ func _refresh_model_list() -> void:
 	_model_list.clear()
 	for model: Dictionary in _models:
 		var kind: String = str(model.get("kind", "local"))
-		var label: String = "%s  (%s · %s)" % [
+		var role: String = str(model.get("role", "coder"))
+		var label: String = "%s  (%s · %s · %s)" % [
 			str(model.get("display_name", "")),
+			role,
 			kind,
 			str(model.get("model_name", "")),
 		]
 		_model_list.add_item(label)
+
+
+func _refresh_role_pickers() -> void:
+	_suppress_role_signal = true
+	_fill_role_picker(_planner_picker, AgenticStudioConfig.ROLE_PLANNER, AgenticStudioConfig.get_selected_planner_id())
+	_fill_role_picker(_coder_picker, AgenticStudioConfig.ROLE_CODER, AgenticStudioConfig.get_selected_coder_id())
+	_suppress_role_signal = false
+
+
+func _fill_role_picker(picker: OptionButton, role: String, selected_id: String) -> void:
+	picker.clear()
+	picker.add_item("None", 0)
+	picker.set_item_metadata(0, "")
+	var select_i: int = 0
+	var i: int = 1
+	for model: Dictionary in _models:
+		if AgenticStudioConfig.normalize_role(str(model.get("role", ""))) != role:
+			continue
+		var id: String = str(model.get("id", ""))
+		picker.add_item(str(model.get("display_name", id)), i)
+		picker.set_item_metadata(i, id)
+		if id == selected_id:
+			select_i = i
+		i += 1
+	picker.select(select_i)
 
 
 func _refresh_extra_list() -> void:
@@ -180,14 +250,60 @@ func _on_file_selected(path: String) -> void:
 		settings_changed.emit()
 
 
+func _on_planner_picked(index: int) -> void:
+	if _suppress_role_signal:
+		return
+	var id: String = str(_planner_picker.get_item_metadata(index))
+	AgenticStudioConfig.set_selected_planner_id(id)
+	settings_changed.emit()
+
+
+func _on_coder_picked(index: int) -> void:
+	if _suppress_role_signal:
+		return
+	var id: String = str(_coder_picker.get_item_metadata(index))
+	AgenticStudioConfig.set_selected_coder_id(id)
+	settings_changed.emit()
+
+
+func _on_add_grok() -> void:
+	var existing: Dictionary = AgenticStudioConfig.get_model(AgenticStudioConfig.STABLE_GROK_ID)
+	_edit_model({
+		"id": AgenticStudioConfig.STABLE_GROK_ID,
+		"display_name": "Grok",
+		"kind": AgenticStudioConfig.KIND_EXTERNAL,
+		"role": AgenticStudioConfig.ROLE_PLANNER,
+		"provider": AgenticStudioConfig.PROVIDER_GROK,
+		"base_url": AgenticStudioConfig.GROK_BASE_URL,
+		"model_name": AgenticStudioConfig.GROK_MODEL_NAME,
+		"context_length": int(existing.get("context_length", AgenticStudioConfig.DEFAULT_PLANNER_CONTEXT)),
+		"api_key": str(existing.get("api_key", "")),
+	}, existing.is_empty())
+
+
+func _on_add_grok_build() -> void:
+	_edit_model({
+		"id": "",
+		"display_name": "Mini",
+		"kind": AgenticStudioConfig.KIND_LOCAL,
+		"role": AgenticStudioConfig.ROLE_PLANNER,
+		"provider": AgenticStudioConfig.PROVIDER_GROK_BUILD,
+		"base_url": "",
+		"model_name": "grok-build",
+		"context_length": AgenticStudioConfig.DEFAULT_PLANNER_CONTEXT,
+	}, true)
+
+
 func _on_add_local() -> void:
 	_edit_model({
 		"id": "",
-		"display_name": "",
-		"kind": "local",
-		"base_url": "http://127.0.0.1:8080/v1",
-		"model_name": "",
-		"context_length": 0,
+		"display_name": "Local Coder",
+		"kind": AgenticStudioConfig.KIND_LOCAL,
+		"role": AgenticStudioConfig.ROLE_CODER,
+		"provider": AgenticStudioConfig.PROVIDER_OLLAMA,
+		"base_url": AgenticStudioConfig.DEFAULT_OLLAMA_BASE,
+		"model_name": "qwen2.5-coder:7b",
+		"context_length": AgenticStudioConfig.DEFAULT_CODER_CONTEXT,
 	}, true)
 
 
@@ -195,10 +311,11 @@ func _on_add_external() -> void:
 	_edit_model({
 		"id": "",
 		"display_name": "",
-		"kind": "external",
+		"kind": AgenticStudioConfig.KIND_EXTERNAL,
+		"role": AgenticStudioConfig.ROLE_CODER,
 		"base_url": "https://api.openai.com/v1",
 		"model_name": "",
-		"context_length": 0,
+		"context_length": AgenticStudioConfig.DEFAULT_CODER_CONTEXT,
 		"api_key": "",
 	}, true)
 
@@ -223,23 +340,45 @@ func _on_remove_model() -> void:
 func _edit_model(model: Dictionary, is_new: bool) -> void:
 	var dlg := AcceptDialog.new()
 	dlg.title = "Add Model" if is_new else "Edit Model"
-	dlg.min_size = Vector2i(420, 320)
+	dlg.min_size = Vector2i(460, 380)
 	dlg.dialog_hide_on_ok = false
 
 	var form := VBoxContainer.new()
 	dlg.add_child(form)
 
 	var name_edit := _labeled_line(form, "Display name", str(model.get("display_name", "")))
+	var role_row := HBoxContainer.new()
+	form.add_child(role_row)
+	var role_lbl := Label.new()
+	role_lbl.text = "Role"
+	role_lbl.custom_minimum_size = Vector2(160, 0)
+	role_row.add_child(role_lbl)
+	var role_pick := OptionButton.new()
+	role_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	role_pick.add_item("planner", 0)
+	role_pick.add_item("coder", 1)
+	role_pick.select(0 if AgenticStudioConfig.normalize_role(str(model.get("role", ""))) == AgenticStudioConfig.ROLE_PLANNER else 1)
+	# Cloud Grok / Build defaults stay planner; still editable for custom rows.
+	role_row.add_child(role_pick)
+
 	var url_edit := _labeled_line(form, "Base URL", str(model.get("base_url", "")))
+	if str(model.get("provider", "")) == AgenticStudioConfig.PROVIDER_GROK_BUILD:
+		url_edit.placeholder_text = "Running Grok Build base URL (required before Plan)"
 	var model_edit := _labeled_line(form, "Model name", str(model.get("model_name", "")))
-	var ctx_edit := _labeled_line(form, "Context length (optional)", str(int(model.get("context_length", 0))))
+	var default_ctx: int = AgenticStudioConfig.default_context_length(
+		AgenticStudioConfig.normalize_role(str(model.get("role", "coder")))
+	)
+	var ctx_val: int = int(model.get("context_length", 0))
+	if ctx_val <= 0:
+		ctx_val = default_ctx
+	var ctx_edit := _labeled_line(form, "Context length", str(ctx_val))
 	var images_check := CheckBox.new()
 	images_check.text = "Accepts image input (attach screenshots)"
 	images_check.button_pressed = bool(model.get("accepts_images", false))
 	form.add_child(images_check)
 	var key_edit: LineEdit = null
-	if str(model.get("kind", "")) == "external":
-		key_edit = _labeled_line(form, "API key (stored in user:// only)", str(model.get("api_key", "")))
+	if str(model.get("kind", "")) == AgenticStudioConfig.KIND_EXTERNAL:
+		key_edit = _labeled_line(form, "API key (user:// only, masked)", str(model.get("api_key", "")))
 		key_edit.secret = true
 
 	dlg.confirmed.connect(func() -> void:
@@ -249,12 +388,14 @@ func _edit_model(model: Dictionary, is_new: bool) -> void:
 			dlg.dialog_text = "Display name and model name are required."
 			return
 		model["display_name"] = display
+		model["role"] = "planner" if role_pick.selected == 0 else "coder"
 		model["base_url"] = url_edit.text.strip_edges()
 		model["model_name"] = model_name
 		model["context_length"] = int(ctx_edit.text.strip_edges()) if ctx_edit.text.strip_edges().is_valid_int() else 0
 		model["accepts_images"] = images_check.button_pressed
 		if key_edit != null:
 			model["api_key"] = key_edit.text
+		# Never print the key.
 		AgenticStudioConfig.upsert_model(model)
 		_reload_from_disk()
 		settings_changed.emit()

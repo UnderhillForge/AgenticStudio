@@ -200,7 +200,8 @@ func _apply_ops(params: Dictionary) -> Dictionary:
 		mode,
 		tools.cited_page_ids,
 		ops_for_log,
-		play
+		play,
+		AgenticStudioConfig.get_model(model_id)
 	)
 	return {
 		"ok": true,

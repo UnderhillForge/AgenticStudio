@@ -8,6 +8,12 @@ from typing import Any
 
 from .client import ApplyClient
 from .planner import chat_completions
+from .user_config import (
+    ROLE_CODER,
+    model_log_fields,
+    pack_context,
+    resolve_selected,
+)
 
 RUN_SYSTEM = (
     "You are executing one AgenticStudio scene op through the plugin apply API. "
@@ -235,8 +241,15 @@ def request_op(
     model: str,
     api_key: str = "",
     page_id: str = "",
+    kind: str = "local",
+    context_length: int = 8192,
     fix_context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
+    last_play_error = ""
+    if fix_context and isinstance(fix_context.get("play"), dict):
+        errs = fix_context["play"].get("errors") or []
+        if errs:
+            last_play_error = json.dumps(errs, ensure_ascii=False)
     if fix_context is None:
         user = prompt
         if page_id:
@@ -252,10 +265,27 @@ def request_op(
         )
         if page_id:
             user += f"\n\nKeep page_id={page_id}."
+    packed = pack_context(
+        {
+            "system": system,
+            "op_schema": RUN_SYSTEM,
+            "page_id": page_id or "(required on every op)",
+            "last_play_error": last_play_error,
+            "prompt": user,
+        },
+        [],
+        [],
+        max(1, int(context_length or 8192)),
+    )
+    if not packed.get("ok"):
+        raise RuntimeError(str(packed.get("error") or "context budget exceeded"))
+    if packed.get("extra"):
+        user = user + "\n\n" + packed["extra"]
     data = chat_completions(
         base_url=base_url,
         model=model,
         api_key=api_key,
+        kind=kind,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -279,32 +309,78 @@ def apply_one(
 def run_harness(
     *,
     prompt: str,
-    base_url: str,
-    model: str,
+    base_url: str = "",
+    model: str = "",
     mode: str = "auto_approve",
     page_id: str = "",
     api_key: str = "",
     model_id: str = "",
     client: ApplyClient | None = None,
+    config_path: str | None = None,
+    use_config: bool = False,
 ) -> dict[str, Any]:
-    """One op apply; on play failure, one fix apply; never a third."""
+    """One op apply; on play failure, one fix apply; never a third. Uses coder only."""
     apply = client or ApplyClient(timeout=180.0)
+    model_row: dict[str, Any] = {}
+    kind = "local"
+    ctx = 8192
+    if use_config or (not base_url and not model):
+        checked = resolve_selected(ROLE_CODER, config_path)
+        if not checked.get("ok"):
+            return {
+                "ok": False,
+                "outcome": "coder_invalid",
+                "error": checked.get("error", "coder invalid"),
+                "attempts": [],
+            }
+        model_row = checked["model"]
+        base_url = checked["base_url"]
+        model = checked["model_name"]
+        kind = str(model_row.get("kind") or "local")
+        api_key = str(model_row.get("api_key") or "") if kind == "external" else ""
+        ctx = int(model_row.get("context_length") or 8192)
+        model_id = model_id or str(model_row.get("id") or model)
+    elif not base_url or not model:
+        return {
+            "ok": False,
+            "outcome": "coder_invalid",
+            "error": "coder base_url and model are required",
+            "attempts": [],
+        }
+
     mid = model_id or model
     attempts: list[dict[str, Any]] = []
+    log_fields = model_log_fields(model_row) if model_row else {
+        "model_id": mid,
+        "role": ROLE_CODER,
+        "display_name": mid,
+    }
 
-    op = request_op(
-        prompt=prompt,
-        base_url=base_url,
-        model=model,
-        api_key=api_key,
-        page_id=page_id,
-    )
+    try:
+        op = request_op(
+            prompt=prompt,
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            kind=kind,
+            context_length=ctx,
+            page_id=page_id,
+        )
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "outcome": "budget",
+            "error": str(exc),
+            "attempts": attempts,
+            "model": log_fields,
+        }
     if op is None:
         return {
             "ok": False,
             "outcome": "plan_only",
             "error": "model returned no applyable op",
             "attempts": attempts,
+            "model": log_fields,
         }
 
     # Do not rewrite missing page_id — plugin rejects.
@@ -313,7 +389,13 @@ def run_harness(
     attempts.append({"op": op, "apply": first, "flags": {k: flags[k] for k in flags if k != "raw"}})
 
     if _succeeded(flags):
-        return {"ok": True, "outcome": "ok", "attempts": attempts, "play": flags["play"]}
+        return {
+            "ok": True,
+            "outcome": "ok",
+            "attempts": attempts,
+            "play": flags["play"],
+            "model": log_fields,
+        }
 
     if not _should_fix(flags):
         outcome = "needs_confirm" if flags["needs_confirm"] else (
@@ -325,6 +407,7 @@ def run_harness(
             "error": flags["error"] or outcome,
             "attempts": attempts,
             "play": flags["play"],
+            "model": log_fields,
         }
 
     failed_page = _page_id_of(op) or page_id
@@ -334,14 +417,26 @@ def run_harness(
         "ops": flags["ops"],
         "page_id": failed_page,
     }
-    fix_op = request_op(
-        prompt=prompt,
-        base_url=base_url,
-        model=model,
-        api_key=api_key,
-        page_id=failed_page,
-        fix_context=fix_ctx,
-    )
+    try:
+        fix_op = request_op(
+            prompt=prompt,
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            kind=kind,
+            context_length=ctx,
+            page_id=failed_page,
+            fix_context=fix_ctx,
+        )
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "outcome": "budget",
+            "error": str(exc),
+            "attempts": attempts,
+            "play": flags["play"],
+            "model": log_fields,
+        }
     if fix_op is None:
         return {
             "ok": False,
@@ -349,6 +444,7 @@ def run_harness(
             "error": "model returned no fix op",
             "attempts": attempts,
             "play": flags["play"],
+            "model": log_fields,
         }
 
     # Still do not rewrite page_id; plugin enforces.
@@ -357,7 +453,13 @@ def run_harness(
     attempts.append({"op": fix_op, "apply": second, "flags": {k: flags2[k] for k in flags2 if k != "raw"}})
 
     if _succeeded(flags2):
-        return {"ok": True, "outcome": "fixed", "attempts": attempts, "play": flags2["play"]}
+        return {
+            "ok": True,
+            "outcome": "fixed",
+            "attempts": attempts,
+            "play": flags2["play"],
+            "model": log_fields,
+        }
 
     outcome = "needs_confirm" if flags2["needs_confirm"] else (
         "page_id_rejected" if flags2["page_id_reject"] else "fix_failed"
@@ -368,4 +470,5 @@ def run_harness(
         "error": flags2["error"] or outcome,
         "attempts": attempts,
         "play": flags2["play"],
+        "model": log_fields,
     }

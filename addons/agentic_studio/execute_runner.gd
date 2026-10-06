@@ -185,7 +185,8 @@ static func finish_job(job: AgenticStudioJob, tools: AgenticStudioSceneTools) ->
 		job.mode,
 		tools.cited_page_ids,
 		tools.ops_log,
-		tools.last_play_result
+		tools.last_play_result,
+		AgenticStudioConfig.get_model(job.model_id)
 	)
 
 
@@ -271,7 +272,8 @@ static func run_plan_sync(
 		job.mode,
 		tools.cited_page_ids,
 		tools.ops_log,
-		null
+		null,
+		AgenticStudioConfig.get_model(job.model_id)
 	)
 
 
