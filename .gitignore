@@ -25,6 +25,10 @@ agent_probe_broken.gd
 agent_probe_broken.gd.uid
 agent_probe_ready.gd
 agent_probe_ready.gd.uid
+harness_boom.gd
+harness_boom.gd.uid
+harness_fix.gd
+harness_fix.gd.uid
 
 # Agentic session frames; keep local jsonl on disk, do not commit runtime logs
 **/.agentic/**/*.png
@@ -38,6 +42,12 @@ override.cfg
 .godot/
 *.translation
 export_presets.cfg
+
+# Python sidecar
+sidecar/.venv/
+sidecar/**/__pycache__/
+**/__pycache__/
+*.py[cod]
 
 # OS / editor noise
 .DS_Store

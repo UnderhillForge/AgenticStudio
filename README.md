@@ -39,9 +39,12 @@ Loopback apply API on `127.0.0.1:8765` while the editor is open:
 ```bash
 cd sidecar && uv sync
 uv run agentic-sidecar ping
+uv run agentic-sidecar run \
+  --prompt "…" --base-url http://127.0.0.1:11434/v1 --model qwen2.5-coder:7b \
+  --mode auto_approve --page-id goblin_shaman
 ```
 
-See `sidecar/README.md`.
+`run` asks the model for one op, applies it through the plugin (play gate included), and allows exactly one fix if play fails. See `sidecar/README.md`.
 
 ## License
 

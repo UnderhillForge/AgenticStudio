@@ -137,6 +137,7 @@ func _apply_ops(params: Dictionary) -> Dictionary:
 	var tools := AgenticStudioSceneTools.new()
 	tools.setup(job_id)
 	var results: Array = []
+	var logged_ops: Array = []
 	var ask_writes: bool = mode == "run"
 	for op_v: Variant in ops:
 		if typeof(op_v) != TYPE_DICTIONARY:
@@ -146,6 +147,7 @@ func _apply_ops(params: Dictionary) -> Dictionary:
 		var args: Dictionary = {}
 		if typeof(op.get("arguments", op.get("args", {}))) == TYPE_DICTIONARY:
 			args = op.get("arguments", op.get("args", {}))
+		logged_ops.append({"tool": tool_name, "arguments": args})
 		if not AgenticStudioSceneTools.is_allowed_tool(tool_name):
 			results.append({"tool": tool_name, "ok": false, "error": "blocked"})
 			continue
@@ -191,11 +193,13 @@ func _apply_ops(params: Dictionary) -> Dictionary:
 		var play_out: Dictionary = await tools.execute_play()
 		play = play_out.get("result", {})
 	tools.finish()
+	# Prefer executed ops_log; fall back to requested ops (needs_confirm / rejects).
+	var ops_for_log: Array = tools.ops_log if not tools.ops_log.is_empty() else logged_ops
 	SessionLogScript.append_plan_or_run(
 		model_id,
 		mode,
 		tools.cited_page_ids,
-		tools.ops_log,
+		ops_for_log,
 		play
 	)
 	return {

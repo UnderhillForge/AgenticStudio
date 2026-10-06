@@ -21,8 +21,8 @@ func run() -> Dictionary:
 	var scene_path: String = "res://agent_probe_scene.tscn"
 	_ensure_probe_scene(scene_path)
 	EditorInterface.open_scene_from_path(scene_path)
-	EditorInterface.set_main_screen_editor("3D")
-	await _frames(3)
+	# Skip set_main_screen_editor — can trip macOS menu-thread asserts during live boots.
+	await _frames(6)
 	var root: Node = EditorInterface.get_edited_scene_root()
 	if root == null:
 		return {"ok": false, "failures": PackedStringArray(["no open scene"])}

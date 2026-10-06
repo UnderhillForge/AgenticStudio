@@ -1,4 +1,4 @@
-"""CLI: ping | apply | plan — never writes scenes/project.godot/autoloads."""
+"""CLI: ping | apply | plan | run — never writes scenes/project.godot/autoloads."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import sys
 
 from .client import ApplyClient, DEFAULT_HOST, DEFAULT_PORT
 from .planner import plan_prompt
+from .runner import run_harness
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -29,8 +30,28 @@ def main(argv: list[str] | None = None) -> int:
     plan_p.add_argument("--model", required=True)
     plan_p.add_argument("--api-key", default="")
 
+    run_p = sub.add_parser(
+        "run",
+        help="One model op → apply → at most one fix through the plugin (harness loop)",
+    )
+    run_p.add_argument("--prompt", required=True)
+    run_p.add_argument("--base-url", required=True)
+    run_p.add_argument("--model", required=True, help="Model name for the chat API")
+    run_p.add_argument(
+        "--model-id",
+        default="",
+        help="Id recorded in session jsonl (defaults to --model)",
+    )
+    run_p.add_argument("--mode", default="auto_approve", choices=["auto_approve", "run"])
+    run_p.add_argument(
+        "--page-id",
+        default="",
+        help="Optional page_id hint for the prompt; never rewritten onto the op",
+    )
+    run_p.add_argument("--api-key", default="")
+
     args = parser.parse_args(argv)
-    client = ApplyClient(host=args.host, port=args.port)
+    client = ApplyClient(host=args.host, port=args.port, timeout=180.0)
 
     if args.cmd == "ping":
         print(json.dumps(client.ping(), indent=2))
@@ -51,6 +72,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(text)
         return 0
+
+    if args.cmd == "run":
+        result = run_harness(
+            prompt=args.prompt,
+            base_url=args.base_url,
+            model=args.model,
+            mode=args.mode,
+            page_id=args.page_id,
+            api_key=args.api_key,
+            model_id=args.model_id or args.model,
+            client=client,
+        )
+        print(json.dumps(result, indent=2))
+        return 0 if bool(result.get("ok")) else 1
 
     return 1
 

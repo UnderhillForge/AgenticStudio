@@ -11,6 +11,7 @@ const LiveDockScript = preload("res://addons/agentic_studio/live_dock_check.gd")
 const LiveFileScript = preload("res://addons/agentic_studio/live_file_check.gd")
 const LiveScreenshotScript = preload("res://addons/agentic_studio/live_screenshot_check.gd")
 const LivePlaySensorScript = preload("res://addons/agentic_studio/live_play_sensor_check.gd")
+const LiveSidecarRunScript = preload("res://addons/agentic_studio/live_sidecar_run_check.gd")
 const PageStoreScript = preload("res://addons/agentic_studio/page_store.gd")
 const PlayDebuggerScript = preload("res://addons/agentic_studio/play_debugger.gd")
 const PlaySupportScript = preload("res://addons/agentic_studio/play_support.gd")
@@ -176,18 +177,30 @@ func _run_live_screenshot_and_quit() -> void:
 
 
 func _run_live_play_sensor_and_quit() -> void:
-	await get_tree().create_timer(0.5).timeout
+	# Give the editor (docks/menus/filesystem) time to finish main-thread setup on macOS.
+	await get_tree().create_timer(2.0).timeout
 	var check = LivePlaySensorScript.new()
 	var result: Dictionary = await check.run()
-	if bool(result.get("ok", false)):
-		print("AgenticStudio live_play_sensor_check: OK")
-		for key: String in ["auto_job", "parse_job", "plan_job"]:
-			if result.has(key):
-				print("  ", key, "=", result[key])
-		get_tree().quit(0)
-	else:
+	if not bool(result.get("ok", false)):
 		print("AgenticStudio live_play_sensor_check: FAILED")
 		var failures: PackedStringArray = result.get("failures", PackedStringArray())
 		for f: String in failures:
 			print("  - ", f)
+		get_tree().quit(1)
+		return
+	print("AgenticStudio live_play_sensor_check: OK")
+	for key: String in ["auto_job", "parse_job", "plan_job"]:
+		if result.has(key):
+			print("  ", key, "=", result[key])
+	# Close the harness loop under the same live env.
+	var harness = LiveSidecarRunScript.new()
+	var harness_result: Dictionary = await harness.run()
+	if bool(harness_result.get("ok", false)):
+		print("AgenticStudio live_sidecar_run_check: OK")
+		get_tree().quit(0)
+	else:
+		print("AgenticStudio live_sidecar_run_check: FAILED")
+		var hf: PackedStringArray = harness_result.get("failures", PackedStringArray())
+		for f2: String in hf:
+			print("  - ", f2)
 		get_tree().quit(1)
