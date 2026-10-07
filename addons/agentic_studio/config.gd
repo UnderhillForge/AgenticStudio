@@ -198,6 +198,66 @@ static func set_drawthings_model(filename: String, cfg: ConfigFile = null) -> vo
 	save_config(c)
 
 
+## Resolve a bare binary name (e.g. draw-things-cli) via PATH. Absolute paths pass through.
+static func resolve_binary_path(raw: String) -> String:
+	var s: String = raw.strip_edges()
+	if s.is_empty():
+		return ""
+	if s.begins_with("~"):
+		s = s.replace("~", OS.get_environment("HOME"))
+	if s.begins_with("/") or s.find("/") >= 0 or s.find("\\") >= 0:
+		return s
+	var output: Array = []
+	var code: int = OS.execute("which", PackedStringArray([s]), output, true, false)
+	if code != 0 or output.is_empty():
+		return s
+	var resolved: String = str(output[0]).strip_edges()
+	if resolved.find("\n") >= 0:
+		resolved = resolved.get_slice("\n", 0).strip_edges()
+	if resolved.is_empty():
+		return s
+	return resolved
+
+
+## Status text for Studio Draw Things tool fields. Empty string when all three are set.
+static func drawthings_status_text(cfg: ConfigFile = null) -> String:
+	var missing: PackedStringArray = PackedStringArray()
+	if get_drawthings_cli(cfg).strip_edges().is_empty():
+		missing.append("CLI path")
+	if get_drawthings_models_dir(cfg).strip_edges().is_empty():
+		missing.append("models directory")
+	if get_drawthings_model(cfg).strip_edges().is_empty():
+		missing.append("checkpoint filename")
+	if missing.is_empty():
+		return ""
+	if missing.size() == 1:
+		return "Draw Things: missing %s" % missing[0]
+	return "Draw Things: missing %s" % ", ".join(missing)
+
+
+## Save Draw Things tool fields only. Does not clear models or planner/coder selection.
+static func save_drawthings_fields(
+	cli_raw: String,
+	models_dir: String,
+	model_filename: String,
+	cfg: ConfigFile = null
+) -> Dictionary:
+	var nul_err: String = config_nul_error()
+	if not nul_err.is_empty():
+		return {"ok": false, "error": nul_err, "cli": ""}
+	var keep_planner: String = get_selected_planner_id()
+	var keep_coder: String = get_selected_coder_id()
+	var cli_abs: String = resolve_binary_path(cli_raw)
+	set_drawthings_cli(cli_abs, cfg)
+	set_drawthings_models_dir(models_dir.strip_edges(), cfg)
+	set_drawthings_model(model_filename.strip_edges(), cfg)
+	if get_selected_planner_id() != keep_planner and not keep_planner.is_empty():
+		set_selected_planner_id(keep_planner)
+	if get_selected_coder_id() != keep_coder and not keep_coder.is_empty():
+		set_selected_coder_id(keep_coder)
+	return {"ok": true, "error": "", "cli": cli_abs}
+
+
 static func list_models(cfg: ConfigFile = null) -> Array[Dictionary]:
 	var c: ConfigFile = cfg if cfg != null else load_config()
 	var ids: PackedStringArray = PackedStringArray(c.get_value(SECTION_MODELS, KEY_MODEL_IDS, PackedStringArray()))

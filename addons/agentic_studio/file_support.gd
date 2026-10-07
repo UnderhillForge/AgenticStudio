@@ -3,6 +3,11 @@ extends RefCounted
 ## Text file helpers under res:// for list/read/write/delete tools.
 ## Undo methods are called from EditorUndoRedoManager; keep this instance alive.
 
+static func _string_has_nul(content: String) -> bool:
+	## True when content contains a NUL byte. Do not put a NUL escape in source (U+FFFD parse noise).
+	return content.to_utf8_buffer().find(0) >= 0
+
+
 static func _binary_extensions() -> PackedStringArray:
 	return PackedStringArray([
 		"png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "ico",
@@ -117,7 +122,8 @@ static func read_text_file(path: String) -> Dictionary:
 	var content: String = f.get_as_text()
 	f.close()
 	# Reject NUL-heavy payloads that slipped past extension checks.
-	if content.find("\u0000") >= 0:
+	# Do not embed a NUL escape in source — Godot's UTF-8 parse warns U+FFFD on literal NULs.
+	if _string_has_nul(content):
 		return {"ok": false, "error": "refusing binary content: %s" % res_path, "content": "", "path": res_path}
 	return {"ok": true, "error": "", "content": content, "path": res_path}
 
@@ -134,7 +140,7 @@ static func write_text_file(path: String, content: String) -> Dictionary:
 		return {"ok": false, "error": "refusing binary file: %s" % res_path, "path": res_path}
 	if typeof(content) != TYPE_STRING:
 		content = str(content)
-	if content.find("\u0000") >= 0:
+	if _string_has_nul(content):
 		return {"ok": false, "error": "refusing binary content", "path": res_path}
 
 	var existed: bool = FileAccess.file_exists(res_path)

@@ -23,6 +23,7 @@ var _suppress_role_signal: bool = false
 var _ui_root: VBoxContainer = null
 var _status_label: Label = null
 var _saved_exclusive: bool = true
+var _file_dialog_open: bool = false
 
 
 func _ready() -> void:
@@ -35,8 +36,19 @@ func _ready() -> void:
 
 
 func open_settings() -> void:
+	# Do not popup settings while a file dialog owns the exclusive slot.
+	if _file_dialog_open:
+		return
+	if _file_dialog != null and is_instance_valid(_file_dialog) and _file_dialog.visible:
+		return
+	if _dir_dialog != null and is_instance_valid(_dir_dialog) and _dir_dialog.visible:
+		return
 	_reload_from_disk()
 	popup_centered_ratio(0.55)
+
+
+func is_file_dialog_open() -> bool:
+	return _file_dialog_open
 
 
 ## EditorFileDialog must not be an exclusive child of this AcceptDialog.
@@ -79,13 +91,15 @@ func _popup_browse_dialog(dlg: EditorFileDialog) -> void:
 	if dlg == null or not is_instance_valid(dlg):
 		push_warning("AgenticStudio: file dialog unavailable")
 		return
-	# Drop exclusive while the file dialog is open so it can receive input.
+	# File browse owns the exclusive slot; settings must not stay exclusive.
 	_saved_exclusive = exclusive
 	exclusive = false
+	_file_dialog_open = true
 	dlg.popup_file_dialog()
 
 
 func _on_browse_finished() -> void:
+	_file_dialog_open = false
 	exclusive = _saved_exclusive
 
 
@@ -376,12 +390,25 @@ func _fill_role_picker(picker: OptionButton, role: String, selected_id: String) 
 		if AgenticStudioConfig.normalize_role(str(model.get("role", ""))) != role:
 			continue
 		var id: String = str(model.get("id", ""))
-		picker.add_item(str(model.get("display_name", id)), i)
+		var display: String = str(model.get("display_name", id))
+		# Draw Things is a tool, never a planner/coder model row.
+		if _looks_like_drawthings_tool(id, display):
+			continue
+		picker.add_item(display, i)
 		picker.set_item_metadata(i, id)
 		if id == selected_id:
 			select_i = i
 		i += 1
 	picker.select(select_i)
+
+
+func _looks_like_drawthings_tool(id: String, display: String) -> bool:
+	var blob: String = ("%s %s" % [id, display]).to_lower()
+	return (
+		blob.find("drawthings") >= 0
+		or blob.find("draw-things") >= 0
+		or blob.find("draw things") >= 0
+	)
 
 
 func _refresh_extra_list() -> void:
@@ -404,58 +431,37 @@ func _save_blender() -> void:
 	settings_changed.emit()
 
 
-## Resolve a bare binary name (e.g. draw-things-cli) via PATH on macOS/Linux.
 static func resolve_binary_path(raw: String) -> String:
-	var s: String = raw.strip_edges()
-	if s.is_empty():
-		return ""
-	if s.begins_with("/") or s.begins_with("~") or s.find("/") >= 0 or s.find("\\") >= 0:
-		if s.begins_with("~"):
-			s = s.replace("~", OS.get_environment("HOME"))
-		return s
-	var output: Array = []
-	var code: int = OS.execute("which", PackedStringArray([s]), output, true, false)
-	if code != 0 or output.is_empty():
-		return s
-	var resolved: String = str(output[0]).strip_edges()
-	# which may print multiple lines; take the first.
-	if resolved.find("\n") >= 0:
-		resolved = resolved.get_slice("\n", 0).strip_edges()
-	if resolved.is_empty():
-		return s
-	return resolved
+	return AgenticStudioConfig.resolve_binary_path(raw)
 
 
 func _save_drawthings() -> void:
 	## Saves Draw Things fields only. Does not clear models or planner/coder selection.
 	_ensure_drawthings_edits()
-	var nul_err: String = AgenticStudioConfig.config_nul_error()
-	if not nul_err.is_empty():
-		_set_status(nul_err)
-		return
 	var cli_raw: String = ""
+	var models_dir: String = ""
+	var model_fn: String = ""
 	if _drawthings_cli_edit != null:
 		cli_raw = _drawthings_cli_edit.text.strip_edges()
-	var cli_abs: String = resolve_binary_path(cli_raw)
+	if _drawthings_models_edit != null:
+		models_dir = _drawthings_models_edit.text.strip_edges()
+	if _drawthings_model_edit != null:
+		model_fn = _drawthings_model_edit.text.strip_edges()
+	var keep_models: Array[Dictionary] = _models.duplicate(true)
+	var saved: Dictionary = AgenticStudioConfig.save_drawthings_fields(cli_raw, models_dir, model_fn)
+	if not bool(saved.get("ok", false)):
+		_set_status(str(saved.get("error", "save failed")))
+		_models = keep_models
+		_refresh_model_list()
+		_refresh_role_pickers()
+		return
+	var cli_abs: String = str(saved.get("cli", cli_raw))
 	if _drawthings_cli_edit != null and cli_abs != cli_raw:
 		_drawthings_cli_edit.text = cli_abs
-	# Preserve in-memory model list across tool-key saves.
-	var keep_models: Array[Dictionary] = _models.duplicate(true)
-	var keep_planner: String = AgenticStudioConfig.get_selected_planner_id()
-	var keep_coder: String = AgenticStudioConfig.get_selected_coder_id()
-	AgenticStudioConfig.set_drawthings_cli(cli_abs)
-	if _drawthings_models_edit != null:
-		AgenticStudioConfig.set_drawthings_models_dir(_drawthings_models_edit.text.strip_edges())
-	if _drawthings_model_edit != null:
-		AgenticStudioConfig.set_drawthings_model(_drawthings_model_edit.text.strip_edges())
-	# Re-assert selection if a partial load somehow blanked them (NUL-safe save refuses wipe).
-	if AgenticStudioConfig.get_selected_planner_id() != keep_planner and not keep_planner.is_empty():
-		AgenticStudioConfig.set_selected_planner_id(keep_planner)
-	if AgenticStudioConfig.get_selected_coder_id() != keep_coder and not keep_coder.is_empty():
-		AgenticStudioConfig.set_selected_coder_id(keep_coder)
 	_models = keep_models
 	_refresh_model_list()
 	_refresh_role_pickers()
+	_set_status(AgenticStudioConfig.drawthings_status_text())
 	settings_changed.emit()
 
 

@@ -49,6 +49,11 @@ var _studio_send: Button
 var _studio_split: VSplitContainer
 var _studio_jobs: Array[AgenticStudioJob] = []
 var _studio_transcript: RefCounted = null  ## AgenticStudioSessionTranscript
+# Studio-tab Draw Things tool fields (not models — never in Plan/Code pickers).
+var _studio_dt_cli: LineEdit
+var _studio_dt_models: LineEdit
+var _studio_dt_model: LineEdit
+var _studio_dt_status: Label
 
 # Session tabs: parallel to TabBar indices 1..n
 # Each entry: panel, split, log, prompt, planner, coder, mode, settings, send, job, title, transcript
@@ -161,6 +166,7 @@ func _build_studio_panel() -> Control:
 	panel.add_theme_constant_override("separation", 4)
 
 	panel.add_child(_build_pages_panel())
+	panel.add_child(_build_drawthings_panel())
 
 	_studio_split = VSplitContainer.new()
 	_studio_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -194,6 +200,93 @@ func _build_studio_panel() -> Control:
 	var chrome: Control = composer["chrome"] as Control
 	panel.add_child(chrome)
 	return panel
+
+
+func _build_drawthings_panel() -> Control:
+	## Draw Things is a tool on the Studio tab — not a planner/coder model.
+	var panel := VBoxContainer.new()
+	panel.name = "DrawThingsPanel"
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	panel.add_theme_constant_override("separation", 2)
+
+	var title := Label.new()
+	title.text = "Draw Things (image tool)"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_child(title)
+
+	_studio_dt_cli = LineEdit.new()
+	_studio_dt_cli.placeholder_text = "CLI path (e.g. draw-things-cli)"
+	_studio_dt_cli.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_studio_dt_cli.text_submitted.connect(func(_t: String) -> void: _save_studio_drawthings())
+	_studio_dt_cli.focus_exited.connect(_save_studio_drawthings)
+	panel.add_child(_studio_dt_cli)
+
+	_studio_dt_models = LineEdit.new()
+	_studio_dt_models.placeholder_text = "Models directory"
+	_studio_dt_models.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_studio_dt_models.text_submitted.connect(func(_t: String) -> void: _save_studio_drawthings())
+	_studio_dt_models.focus_exited.connect(_save_studio_drawthings)
+	panel.add_child(_studio_dt_models)
+
+	_studio_dt_model = LineEdit.new()
+	_studio_dt_model.placeholder_text = "Checkpoint filename"
+	_studio_dt_model.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_studio_dt_model.text_submitted.connect(func(_t: String) -> void: _save_studio_drawthings())
+	_studio_dt_model.focus_exited.connect(_save_studio_drawthings)
+	panel.add_child(_studio_dt_model)
+
+	_studio_dt_status = Label.new()
+	_studio_dt_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_studio_dt_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_child(_studio_dt_status)
+
+	_reload_studio_drawthings_fields()
+	return panel
+
+
+func _reload_studio_drawthings_fields() -> void:
+	if _studio_dt_cli != null:
+		_studio_dt_cli.text = AgenticStudioConfig.get_drawthings_cli()
+	if _studio_dt_models != null:
+		_studio_dt_models.text = AgenticStudioConfig.get_drawthings_models_dir()
+	if _studio_dt_model != null:
+		_studio_dt_model.text = AgenticStudioConfig.get_drawthings_model()
+	_update_studio_drawthings_status()
+
+
+func _update_studio_drawthings_status() -> void:
+	if _studio_dt_status == null:
+		return
+	var msg: String = AgenticStudioConfig.drawthings_status_text()
+	_studio_dt_status.text = msg if not msg.is_empty() else "Draw Things: ready"
+	_studio_dt_status.visible = true
+
+
+func _save_studio_drawthings() -> void:
+	if _studio_dt_cli == null or _studio_dt_models == null or _studio_dt_model == null:
+		return
+	var keep_planner: String = AgenticStudioConfig.get_selected_planner_id()
+	var keep_coder: String = AgenticStudioConfig.get_selected_coder_id()
+	var saved: Dictionary = AgenticStudioConfig.save_drawthings_fields(
+		_studio_dt_cli.text,
+		_studio_dt_models.text,
+		_studio_dt_model.text
+	)
+	if not bool(saved.get("ok", false)):
+		if _studio_dt_status != null:
+			_studio_dt_status.text = str(saved.get("error", "Draw Things save failed"))
+		return
+	var cli_abs: String = str(saved.get("cli", ""))
+	if _studio_dt_cli.text.strip_edges() != cli_abs:
+		_studio_dt_cli.text = cli_abs
+	# Saving tool fields must not clear models or selected planner/coder.
+	if AgenticStudioConfig.get_selected_planner_id() != keep_planner and not keep_planner.is_empty():
+		AgenticStudioConfig.set_selected_planner_id(keep_planner)
+	if AgenticStudioConfig.get_selected_coder_id() != keep_coder and not keep_coder.is_empty():
+		AgenticStudioConfig.set_selected_coder_id(keep_coder)
+	_update_studio_drawthings_status()
+	_refresh_all_model_pickers()
 
 
 func _build_pages_panel() -> Control:
@@ -619,6 +712,9 @@ func _on_tab_selected(tab: int) -> void:
 
 
 func _session_close_icon() -> Texture2D:
+	# Headless / non-editor: EditorInterface is unavailable.
+	if not Engine.is_editor_hint():
+		return null
 	var base: Control = EditorInterface.get_base_control()
 	if base != null and base.has_theme_icon("Close", "EditorIcons"):
 		return base.get_theme_icon("Close", "EditorIcons")
@@ -960,10 +1056,10 @@ func _send_from(
 	var model: Dictionary = AgenticStudioConfig.get_model(selected_id)
 	var checked: Dictionary = AgenticStudioConfig.validate_role_endpoint(model, expected_role)
 	if not bool(checked.get("ok", false)):
-		_status_line.text = "%s — nothing written. · %s" % [
-			str(checked.get("error", "model invalid")),
-			_blender_status_fragment(),
-		]
+		var err_msg: String = str(checked.get("error", "model invalid"))
+		# Plan with blank Build URL: log named error, do not open a socket / hang.
+		_status_line.text = "%s — nothing written. · %s" % [err_msg, _blender_status_fragment()]
+		_append_send_failure_log(channel, session_i, prompt, mode, selected_id, err_msg)
 		return
 
 	_set_job_running(true)
@@ -1086,11 +1182,16 @@ func _refresh_job_view(job: AgenticStudioJob) -> void:
 
 
 func _on_settings_pressed() -> void:
+	if _settings_dialog == null:
+		return
+	if _settings_dialog.has_method("is_file_dialog_open") and bool(_settings_dialog.call("is_file_dialog_open")):
+		return
 	_settings_dialog.open_settings()
 
 
 func _on_settings_changed() -> void:
 	_refresh_all_model_pickers()
+	_reload_studio_drawthings_fields()
 	_update_status_line()
 
 
@@ -1390,19 +1491,28 @@ func _fill_one_role_picker(
 	picker.set_item_metadata(0, "")
 	var select_index: int = 0
 	var models: Array[Dictionary] = AgenticStudioConfig.list_models_for_role(role)
-	for i: int in range(models.size()):
-		var model: Dictionary = models[i]
+	var item_i: int = 1
+	for model: Dictionary in models:
 		var id: String = str(model.get("id", ""))
-		ids_out.append(id)
 		var display: String = str(model.get("display_name", id))
+		# Draw Things is a tool, never a planner/coder model row.
+		if _looks_like_drawthings_tool(id, display):
+			continue
+		ids_out.append(id)
 		var kind: String = str(model.get("kind", "local"))
 		var label: String = "%s (%s)" % [display, kind]
-		picker.add_item(label, i + 1)
-		picker.set_item_metadata(i + 1, display)
+		picker.add_item(label, item_i)
+		picker.set_item_metadata(item_i, display)
 		if id == selected_id:
-			select_index = i + 1
+			select_index = item_i
+		item_i += 1
 	picker.select(select_index)
 	_update_role_picker_tooltip(picker)
+
+
+func _looks_like_drawthings_tool(id: String, display: String) -> bool:
+	var blob: String = ("%s %s" % [id, display]).to_lower()
+	return blob.find("drawthings") >= 0 or blob.find("draw-things") >= 0 or blob.find("draw things") >= 0
 
 
 func _update_role_picker_tooltip(picker: OptionButton) -> void:
@@ -1500,6 +1610,94 @@ func _session_id_for_job(job: AgenticStudioJob) -> String:
 	return "session"
 
 
+func _append_send_failure_log(
+	channel: String,
+	session_i: int,
+	prompt: String,
+	mode: String,
+	model_id: String,
+	error_msg: String
+) -> void:
+	## Visible dock/session log for Plan validation failures (no socket opened).
+	var safe: String = _sanitize_log_text(error_msg)
+	if channel == AgenticStudioJob.CHANNEL_STUDIO:
+		if _studio_transcript == null:
+			_studio_transcript = TranscriptScript.new(TranscriptScript.STUDIO_SESSION_ID)
+			_studio_transcript.title = "Studio"
+		_studio_transcript.begin_turn(prompt, mode, model_id, "")
+		var job := AgenticStudioJob.new()
+		job.prompt = prompt
+		job.model_id = model_id
+		job.mode = mode
+		job.channel = channel
+		job.stage = AgenticStudioJob.STAGE_FAILED
+		job.append_log(safe)
+		job.save()
+		_studio_transcript.sync_turn_from_job(_studio_transcript.turns.size() - 1, job)
+		_studio_transcript.save()
+		_refresh_studio_log()
+		return
+	if session_i < 0 or session_i >= _sessions.size():
+		return
+	var entry: Dictionary = _sessions[session_i]
+	var tr: RefCounted = entry.get("transcript") as RefCounted
+	if tr == null:
+		tr = TranscriptScript.new()
+		entry["transcript"] = tr
+	tr.begin_turn(prompt, mode, model_id, "")
+	var job2 := AgenticStudioJob.new()
+	job2.prompt = prompt
+	job2.model_id = model_id
+	job2.mode = mode
+	job2.channel = channel
+	job2.stage = AgenticStudioJob.STAGE_FAILED
+	job2.append_log(safe)
+	job2.save()
+	tr.sync_turn_from_job(tr.turns.size() - 1, job2)
+	tr.save()
+	_apply_transcript_to_view(entry["log"] as TextEdit, tr)
+	_sessions[session_i] = entry
+
+
+func _sanitize_log_text(text: String) -> String:
+	## Session and dock logs must never include an API key.
+	var out: String = text
+	var key_markers: PackedStringArray = PackedStringArray([
+		"Authorization: Bearer ",
+		"api_key",
+		"api-key",
+	])
+	for marker: String in key_markers:
+		var at: int = out.findn(marker)
+		while at >= 0:
+			var end: int = at
+			while end < out.length() and out[end] != " " and out[end] != "\n" and out[end] != "\"":
+				end += 1
+			out = out.substr(0, at) + "[redacted]" + out.substr(end)
+			at = out.findn(marker)
+	return out
+
+
+func _host_port_from_url(url: String) -> String:
+	var u: String = url.strip_edges()
+	if u.is_empty():
+		return "unknown:0"
+	var rest: String = u
+	if rest.begins_with("https://"):
+		rest = rest.substr(8)
+	elif rest.begins_with("http://"):
+		rest = rest.substr(7)
+	var slash: int = rest.find("/")
+	if slash >= 0:
+		rest = rest.substr(0, slash)
+	if rest.find(":") < 0:
+		if u.begins_with("https://"):
+			rest = "%s:443" % rest
+		else:
+			rest = "%s:80" % rest
+	return rest
+
+
 func _run_plan(job: AgenticStudioJob, model: Dictionary) -> void:
 	## Planner only. No apply API, no scene writes. Discard any write-shaped reply.
 	var tools := AgenticStudioSceneTools.new()
@@ -1519,7 +1717,7 @@ func _run_plan(job: AgenticStudioJob, model: Dictionary) -> void:
 		budget
 	)
 	if not bool(packed.get("ok", false)):
-		job.append_log(str(packed.get("error", "context budget exceeded")))
+		job.append_log(_sanitize_log_text(str(packed.get("error", "context budget exceeded"))))
 		job.stage = AgenticStudioJob.STAGE_FAILED
 		job.save()
 		return
@@ -1538,9 +1736,9 @@ func _run_plan(job: AgenticStudioJob, model: Dictionary) -> void:
 		_refresh_job_view(job)
 		AgenticStudioModelClient.apply_pending_shots(messages, model, tools)
 
-		var response: Dictionary = await _http_chat(model, messages, true, true)
+		var response: Dictionary = await _http_chat(model, messages, true, true, job.mode)
 		if not bool(response.get("ok", false)):
-			job.append_log(str(response.get("error", "plan request failed")))
+			job.append_log(_sanitize_log_text(str(response.get("error", "plan request failed"))))
 			job.stage = AgenticStudioJob.STAGE_FAILED
 			job.save()
 			AgenticStudioSessionLog.append_plan_or_run(
@@ -1823,7 +2021,8 @@ func _http_chat(
 	model: Dictionary,
 	messages: Array,
 	include_tools: bool,
-	plan_only_tools: bool = false
+	plan_only_tools: bool = false,
+	mode: String = ""
 ) -> Dictionary:
 	var built: Dictionary = AgenticStudioModelClient.build_chat_request(
 		model,
@@ -1837,15 +2036,15 @@ func _http_chat(
 			"status": 0,
 			"body": "",
 			"message": {},
-			"error": str(built.get("error", "build failed")),
+			"error": _sanitize_log_text(str(built.get("error", "build failed"))),
 		}
-	var raw: Dictionary = await _http_chat_raw(
-		str(built.get("url", "")),
-		built.get("headers", PackedStringArray()),
-		str(built.get("body", ""))
-	)
+	var url: String = str(built.get("url", ""))
+	# Strip Authorization from headers before any accidental log of the request shape.
+	var headers: PackedStringArray = built.get("headers", PackedStringArray())
+	var raw: Dictionary = await _http_chat_raw(url, headers, str(built.get("body", "")), mode, plan_only_tools)
 	if not bool(raw.get("ok", false)):
 		raw["message"] = {}
+		raw["error"] = _sanitize_log_text(str(raw.get("error", "")))
 		return raw
 	var message: Dictionary = AgenticStudioModelClient.parse_assistant_message(
 		str(raw.get("body", ""))
@@ -1858,10 +2057,12 @@ func _http_chat(
 			"status": int(raw.get("status", 0)),
 			"body": str(raw.get("body", "")),
 			"message": message,
-			"error": AgenticStudioModelClient.format_failure_log(
-				int(raw.get("status", 0)),
-				"empty_assistant",
-				str(raw.get("body", ""))
+			"error": _sanitize_log_text(
+				AgenticStudioModelClient.format_failure_log(
+					int(raw.get("status", 0)),
+					"empty_assistant",
+					str(raw.get("body", ""))
+				)
 			),
 		}
 	return {
@@ -1873,9 +2074,25 @@ func _http_chat(
 	}
 
 
-func _http_chat_raw(url: String, headers: PackedStringArray, body: String) -> Dictionary:
+func _http_chat_raw(
+	url: String,
+	headers: PackedStringArray,
+	body: String,
+	mode: String = "",
+	plan_only: bool = false
+) -> Dictionary:
 	var err: Error = _http.request(url, headers, HTTPClient.METHOD_POST, body)
 	if err != OK:
+		if plan_only:
+			return {
+				"ok": false,
+				"status": 0,
+				"body": "",
+				"error": "planner connection failed: %s · mode=%s" % [
+					_host_port_from_url(url),
+					mode if not mode.is_empty() else "plan",
+				],
+			}
 		return {
 			"ok": false,
 			"status": 0,
@@ -1893,6 +2110,21 @@ func _http_chat_raw(url: String, headers: PackedStringArray, body: String) -> Di
 	var body_text: String = response_body.get_string_from_utf8()
 	var result_label: String = AgenticStudioModelClient.http_request_result_label(result)
 	if result != HTTPRequest.RESULT_SUCCESS:
+		if plan_only and (
+			result == HTTPRequest.RESULT_CANT_CONNECT
+			or result == HTTPRequest.RESULT_CANT_RESOLVE
+			or result == HTTPRequest.RESULT_CONNECTION_ERROR
+			or result == HTTPRequest.RESULT_TIMEOUT
+		):
+			return {
+				"ok": false,
+				"status": response_code,
+				"body": "",
+				"error": "planner connection failed: %s · mode=%s" % [
+					_host_port_from_url(url),
+					mode if not mode.is_empty() else "plan",
+				],
+			}
 		return {
 			"ok": false,
 			"status": response_code,
