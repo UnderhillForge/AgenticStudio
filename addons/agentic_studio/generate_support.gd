@@ -210,13 +210,36 @@ func delete_generated_file(path: String) -> void:
 		DirAccess.remove_absolute(import_sidecar)
 
 
+## Resource.get takes one argument. Never call String.get or Dictionary-style defaults on a String.
+static func _page_string_field(page: Resource, field: String) -> String:
+	if page == null or field.is_empty():
+		return ""
+	var v: Variant = page.get(field)
+	if typeof(v) == TYPE_NIL:
+		return ""
+	if typeof(v) == TYPE_STRING:
+		return v
+	return str(v)
+
+
+static func _page_string_array_field(page: Resource, field: String) -> PackedStringArray:
+	if page == null or field.is_empty():
+		return PackedStringArray()
+	var v: Variant = page.get(field)
+	if typeof(v) == TYPE_PACKED_STRING_ARRAY:
+		return v
+	if typeof(v) == TYPE_ARRAY:
+		return PackedStringArray(v)
+	return PackedStringArray()
+
+
 static func page_has_image(page: Resource, image_path: String) -> bool:
 	if page == null:
 		return false
 	var want: String = image_path.strip_edges().replace("\\", "/")
 	if want.is_empty():
 		return false
-	for existing: String in PackedStringArray(page.get("image_paths")):
+	for existing: String in _page_string_array_field(page, "image_paths"):
 		if existing.strip_edges().replace("\\", "/") == want:
 			return true
 	return false
@@ -232,19 +255,18 @@ static func find_mesh_on_page(page: Resource) -> Dictionary:
 	if page == null:
 		return {"ok": false, "path": "", "error": "page is null"}
 	var candidates: PackedStringArray = PackedStringArray()
-	for img: String in PackedStringArray(page.get("image_paths")):
+	for img: String in _page_string_array_field(page, "image_paths"):
 		if _is_mesh_path(img) and FileAccess.file_exists(ProjectSettings.globalize_path(img)):
 			candidates.append(img)
-	for link_path: String in PackedStringArray(page.get("links")):
+	for link_path: String in _page_string_array_field(page, "links"):
 		var linked: Resource = PageStoreScript.load_page(link_path)
 		if linked == null:
 			continue
-		for limg: String in PackedStringArray(linked.get("image_paths")):
+		for limg: String in _page_string_array_field(linked, "image_paths"):
 			if _is_mesh_path(limg) and FileAccess.file_exists(ProjectSettings.globalize_path(limg)):
 				candidates.append(limg)
-		var notes: String = str(linked.get("notes"))
-		_collect_mesh_paths_from_text(notes, candidates)
-	_collect_mesh_paths_from_text(str(page.get("notes")), candidates)
+		_collect_mesh_paths_from_text(_page_string_field(linked, "notes"), candidates)
+	_collect_mesh_paths_from_text(_page_string_field(page, "notes"), candidates)
 	# Deduplicate while keeping order.
 	var seen: Dictionary = {}
 	var unique: PackedStringArray = PackedStringArray()

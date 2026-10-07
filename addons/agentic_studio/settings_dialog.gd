@@ -20,6 +20,9 @@ var _dir_dialog: EditorFileDialog
 var _browse_target: String = "" # "blender" | "drawthings_cli" | "drawthings_models" | "extra"
 var _browse_extra_index: int = -1
 var _suppress_role_signal: bool = false
+var _ui_root: VBoxContainer = null
+var _status_label: Label = null
+var _saved_exclusive: bool = true
 
 
 func _ready() -> void:
@@ -28,18 +31,7 @@ func _ready() -> void:
 	dialog_hide_on_ok = true
 	min_size = Vector2i(620, 640)
 	_build_ui()
-	_file_dialog = EditorFileDialog.new()
-	_file_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
-	_file_dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
-	_file_dialog.title = "Select program"
-	_file_dialog.file_selected.connect(_on_file_selected)
-	add_child(_file_dialog)
-	_dir_dialog = EditorFileDialog.new()
-	_dir_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_DIR
-	_dir_dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
-	_dir_dialog.title = "Select models directory"
-	_dir_dialog.dir_selected.connect(_on_dir_selected)
-	add_child(_dir_dialog)
+	_ensure_file_dialogs()
 
 
 func open_settings() -> void:
@@ -47,11 +39,72 @@ func open_settings() -> void:
 	popup_centered_ratio(0.55)
 
 
+## EditorFileDialog must not be an exclusive child of this AcceptDialog.
+func _ensure_file_dialogs() -> void:
+	# Headless / non-editor: EditorFileDialog cannot be instantiated.
+	if not Engine.is_editor_hint() or not ClassDB.can_instantiate("EditorFileDialog"):
+		return
+	var host: Node = self
+	var base: Control = EditorInterface.get_base_control()
+	if base != null:
+		host = base
+	if _file_dialog == null or not is_instance_valid(_file_dialog):
+		_file_dialog = EditorFileDialog.new()
+		_file_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
+		_file_dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
+		_file_dialog.title = "Select program"
+		_file_dialog.file_selected.connect(_on_file_selected)
+		_file_dialog.canceled.connect(_on_browse_finished)
+		host.add_child(_file_dialog)
+	elif _file_dialog.get_parent() != host:
+		if _file_dialog.get_parent() != null:
+			_file_dialog.get_parent().remove_child(_file_dialog)
+		host.add_child(_file_dialog)
+	if _dir_dialog == null or not is_instance_valid(_dir_dialog):
+		_dir_dialog = EditorFileDialog.new()
+		_dir_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_DIR
+		_dir_dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
+		_dir_dialog.title = "Select models directory"
+		_dir_dialog.dir_selected.connect(_on_dir_selected)
+		_dir_dialog.canceled.connect(_on_browse_finished)
+		host.add_child(_dir_dialog)
+	elif _dir_dialog.get_parent() != host:
+		if _dir_dialog.get_parent() != null:
+			_dir_dialog.get_parent().remove_child(_dir_dialog)
+		host.add_child(_dir_dialog)
+
+
+func _popup_browse_dialog(dlg: EditorFileDialog) -> void:
+	_ensure_file_dialogs()
+	if dlg == null or not is_instance_valid(dlg):
+		push_warning("AgenticStudio: file dialog unavailable")
+		return
+	# Drop exclusive while the file dialog is open so it can receive input.
+	_saved_exclusive = exclusive
+	exclusive = false
+	dlg.popup_file_dialog()
+
+
+func _on_browse_finished() -> void:
+	exclusive = _saved_exclusive
+
+
 func _build_ui() -> void:
+	# Idempotent rebuild: drop prior content root, keep dialog chrome.
+	if _ui_root != null and is_instance_valid(_ui_root):
+		remove_child(_ui_root)
+		_ui_root.queue_free()
+		_ui_root = null
 	var root := VBoxContainer.new()
 	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_ui_root = root
 	add_child(root)
+
+	_status_label = Label.new()
+	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status_label.visible = false
+	root.add_child(_status_label)
 
 	# --- Selected roles ---
 	var role_label := Label.new()
@@ -228,19 +281,67 @@ func _build_ui() -> void:
 	extra_buttons.add_child(remove_extra_btn)
 
 
+func _ensure_drawthings_edits() -> void:
+	if (
+		_drawthings_cli_edit == null
+		or _drawthings_models_edit == null
+		or _drawthings_model_edit == null
+		or _blender_edit == null
+		or _model_list == null
+		or _planner_picker == null
+		or _coder_picker == null
+	):
+		_build_ui()
+
+
+func _set_status(message: String) -> void:
+	if _status_label == null:
+		return
+	if message.is_empty():
+		_status_label.visible = false
+		_status_label.text = ""
+		return
+	_status_label.visible = true
+	_status_label.text = message
+
+
 func _reload_from_disk() -> void:
-	_models = AgenticStudioConfig.list_models()
+	_ensure_drawthings_edits()
+	var nul_err: String = AgenticStudioConfig.config_nul_error()
+	if not nul_err.is_empty():
+		# Do not overwrite cfg; keep the previous model list on screen.
+		_set_status(nul_err)
+		_fill_tool_fields_safe()
+		_refresh_model_list()
+		_refresh_role_pickers()
+		_refresh_extra_list()
+		return
+
+	var loaded_models: Array[Dictionary] = AgenticStudioConfig.list_models()
+	# Models come from AgenticStudioConfig.list_models() — never cleared by Draw Things saves.
+	_models = loaded_models
 	_extras = AgenticStudioConfig.list_extra_tools()
-	_blender_edit.text = AgenticStudioConfig.get_blender_path()
-	_drawthings_cli_edit.text = AgenticStudioConfig.get_drawthings_cli()
-	_drawthings_models_edit.text = AgenticStudioConfig.get_drawthings_models_dir()
-	_drawthings_model_edit.text = AgenticStudioConfig.get_drawthings_model()
+	_set_status("")
+	_fill_tool_fields_safe()
 	_refresh_model_list()
 	_refresh_role_pickers()
 	_refresh_extra_list()
 
 
+func _fill_tool_fields_safe() -> void:
+	if _blender_edit != null:
+		_blender_edit.text = AgenticStudioConfig.get_blender_path()
+	if _drawthings_cli_edit != null:
+		_drawthings_cli_edit.text = AgenticStudioConfig.get_drawthings_cli()
+	if _drawthings_models_edit != null:
+		_drawthings_models_edit.text = AgenticStudioConfig.get_drawthings_models_dir()
+	if _drawthings_model_edit != null:
+		_drawthings_model_edit.text = AgenticStudioConfig.get_drawthings_model()
+
+
 func _refresh_model_list() -> void:
+	if _model_list == null:
+		return
 	_model_list.clear()
 	for model: Dictionary in _models:
 		var kind: String = str(model.get("kind", "local"))
@@ -255,6 +356,8 @@ func _refresh_model_list() -> void:
 
 
 func _refresh_role_pickers() -> void:
+	if _planner_picker == null or _coder_picker == null:
+		return
 	_suppress_role_signal = true
 	_fill_role_picker(_planner_picker, AgenticStudioConfig.ROLE_PLANNER, AgenticStudioConfig.get_selected_planner_id())
 	_fill_role_picker(_coder_picker, AgenticStudioConfig.ROLE_CODER, AgenticStudioConfig.get_selected_coder_id())
@@ -262,6 +365,8 @@ func _refresh_role_pickers() -> void:
 
 
 func _fill_role_picker(picker: OptionButton, role: String, selected_id: String) -> void:
+	if picker == null:
+		return
 	picker.clear()
 	picker.add_item("None", 0)
 	picker.set_item_metadata(0, "")
@@ -280,6 +385,8 @@ func _fill_role_picker(picker: OptionButton, role: String, selected_id: String) 
 
 
 func _refresh_extra_list() -> void:
+	if _extra_list == null:
+		return
 	_extra_list.clear()
 	for tool: Dictionary in _extras:
 		var path: String = str(tool.get("path", ""))
@@ -288,51 +395,112 @@ func _refresh_extra_list() -> void:
 
 
 func _save_blender() -> void:
+	if _blender_edit == null:
+		return
+	if not AgenticStudioConfig.config_nul_error().is_empty():
+		_set_status(AgenticStudioConfig.config_nul_error())
+		return
 	AgenticStudioConfig.set_blender_path(_blender_edit.text.strip_edges())
 	settings_changed.emit()
 
 
+## Resolve a bare binary name (e.g. draw-things-cli) via PATH on macOS/Linux.
+static func resolve_binary_path(raw: String) -> String:
+	var s: String = raw.strip_edges()
+	if s.is_empty():
+		return ""
+	if s.begins_with("/") or s.begins_with("~") or s.find("/") >= 0 or s.find("\\") >= 0:
+		if s.begins_with("~"):
+			s = s.replace("~", OS.get_environment("HOME"))
+		return s
+	var output: Array = []
+	var code: int = OS.execute("which", PackedStringArray([s]), output, true, false)
+	if code != 0 or output.is_empty():
+		return s
+	var resolved: String = str(output[0]).strip_edges()
+	# which may print multiple lines; take the first.
+	if resolved.find("\n") >= 0:
+		resolved = resolved.get_slice("\n", 0).strip_edges()
+	if resolved.is_empty():
+		return s
+	return resolved
+
+
 func _save_drawthings() -> void:
-	AgenticStudioConfig.set_drawthings_cli(_drawthings_cli_edit.text.strip_edges())
-	AgenticStudioConfig.set_drawthings_models_dir(_drawthings_models_edit.text.strip_edges())
-	AgenticStudioConfig.set_drawthings_model(_drawthings_model_edit.text.strip_edges())
+	## Saves Draw Things fields only. Does not clear models or planner/coder selection.
+	_ensure_drawthings_edits()
+	var nul_err: String = AgenticStudioConfig.config_nul_error()
+	if not nul_err.is_empty():
+		_set_status(nul_err)
+		return
+	var cli_raw: String = ""
+	if _drawthings_cli_edit != null:
+		cli_raw = _drawthings_cli_edit.text.strip_edges()
+	var cli_abs: String = resolve_binary_path(cli_raw)
+	if _drawthings_cli_edit != null and cli_abs != cli_raw:
+		_drawthings_cli_edit.text = cli_abs
+	# Preserve in-memory model list across tool-key saves.
+	var keep_models: Array[Dictionary] = _models.duplicate(true)
+	var keep_planner: String = AgenticStudioConfig.get_selected_planner_id()
+	var keep_coder: String = AgenticStudioConfig.get_selected_coder_id()
+	AgenticStudioConfig.set_drawthings_cli(cli_abs)
+	if _drawthings_models_edit != null:
+		AgenticStudioConfig.set_drawthings_models_dir(_drawthings_models_edit.text.strip_edges())
+	if _drawthings_model_edit != null:
+		AgenticStudioConfig.set_drawthings_model(_drawthings_model_edit.text.strip_edges())
+	# Re-assert selection if a partial load somehow blanked them (NUL-safe save refuses wipe).
+	if AgenticStudioConfig.get_selected_planner_id() != keep_planner and not keep_planner.is_empty():
+		AgenticStudioConfig.set_selected_planner_id(keep_planner)
+	if AgenticStudioConfig.get_selected_coder_id() != keep_coder and not keep_coder.is_empty():
+		AgenticStudioConfig.set_selected_coder_id(keep_coder)
+	_models = keep_models
+	_refresh_model_list()
+	_refresh_role_pickers()
 	settings_changed.emit()
 
 
 func _on_browse_blender() -> void:
 	_browse_target = "blender"
 	_browse_extra_index = -1
+	_ensure_file_dialogs()
 	_file_dialog.title = "Select Blender"
 	_file_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
-	_file_dialog.popup_file_dialog()
+	_popup_browse_dialog(_file_dialog)
 
 
 func _on_browse_drawthings_cli() -> void:
 	_browse_target = "drawthings_cli"
 	_browse_extra_index = -1
+	_ensure_file_dialogs()
 	_file_dialog.title = "Select draw-things-cli"
 	_file_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
-	_file_dialog.popup_file_dialog()
+	_popup_browse_dialog(_file_dialog)
 
 
 func _on_browse_drawthings_models() -> void:
 	_browse_target = "drawthings_models"
 	_browse_extra_index = -1
-	_dir_dialog.popup_file_dialog()
+	_ensure_file_dialogs()
+	_popup_browse_dialog(_dir_dialog)
 
 
 func _on_dir_selected(path: String) -> void:
+	_on_browse_finished()
 	if _browse_target == "drawthings_models":
-		_drawthings_models_edit.text = path
+		if _drawthings_models_edit != null:
+			_drawthings_models_edit.text = path
 		_save_drawthings()
 
 
 func _on_file_selected(path: String) -> void:
+	_on_browse_finished()
 	if _browse_target == "blender":
-		_blender_edit.text = path
+		if _blender_edit != null:
+			_blender_edit.text = path
 		_save_blender()
 	elif _browse_target == "drawthings_cli":
-		_drawthings_cli_edit.text = path
+		if _drawthings_cli_edit != null:
+			_drawthings_cli_edit.text = path
 		_save_drawthings()
 	elif _browse_target == "extra" and _browse_extra_index >= 0 and _browse_extra_index < _extras.size():
 		var tool: Dictionary = _extras[_browse_extra_index].duplicate(true)
@@ -546,11 +714,12 @@ func _edit_extra(tool: Dictionary, is_new: bool) -> void:
 	browse_btn.text = "…"
 	browse_btn.pressed.connect(func() -> void:
 		_browse_target = "extra_pending"
-		_file_dialog.file_selected.connect(
-			func(p: String) -> void: path_edit.text = p,
-			CONNECT_ONE_SHOT
-		)
-		_file_dialog.popup_file_dialog()
+		_ensure_file_dialogs()
+		var on_pick := func(p: String) -> void:
+			path_edit.text = p
+			_on_browse_finished()
+		_file_dialog.file_selected.connect(on_pick, CONNECT_ONE_SHOT)
+		_popup_browse_dialog(_file_dialog)
 	)
 	path_row.add_child(browse_btn)
 

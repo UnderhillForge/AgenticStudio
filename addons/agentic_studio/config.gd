@@ -53,9 +53,32 @@ static func ensure_dirs() -> void:
 		DirAccess.make_dir_recursive_absolute(abs_logs)
 
 
+## Empty string when the on-disk config is safe. Named error when it contains NUL bytes.
+static func config_nul_error() -> String:
+	var abs_path: String = ProjectSettings.globalize_path(CONFIG_PATH)
+	if not FileAccess.file_exists(abs_path):
+		return ""
+	var f: FileAccess = FileAccess.open(abs_path, FileAccess.READ)
+	if f == null:
+		return ""
+	var buf: PackedByteArray = f.get_buffer(f.get_length())
+	f.close()
+	if buf.find(0) >= 0:
+		return (
+			"agentic_studio.cfg contains NUL bytes — refusing to load or overwrite; "
+			+ "fix the file manually (user://agentic_studio.cfg)"
+		)
+	return ""
+
+
 static func load_config() -> ConfigFile:
 	ensure_dirs()
 	var cfg := ConfigFile.new()
+	var nul_err: String = config_nul_error()
+	if not nul_err.is_empty():
+		push_error("AgenticStudio: %s" % nul_err)
+		# Return empty in-memory config; save_config will refuse to write over the disk file.
+		return cfg
 	var err: Error = cfg.load(CONFIG_PATH)
 	if err != OK and err != ERR_FILE_NOT_FOUND:
 		push_warning("AgenticStudio: could not load config (%s): error %d" % [CONFIG_PATH, err])
@@ -64,6 +87,10 @@ static func load_config() -> ConfigFile:
 
 static func save_config(cfg: ConfigFile) -> Error:
 	ensure_dirs()
+	var nul_err: String = config_nul_error()
+	if not nul_err.is_empty():
+		push_error("AgenticStudio: %s" % nul_err)
+		return ERR_INVALID_DATA
 	var err: Error = cfg.save(CONFIG_PATH)
 	if err != OK:
 		push_warning("AgenticStudio: could not save config (%s): error %d" % [CONFIG_PATH, err])
