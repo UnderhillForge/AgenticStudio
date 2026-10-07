@@ -151,6 +151,8 @@ static func _handle_one_tool(
 		outcome = await tools.execute_create_asset(args)
 	elif tool_name == AgenticStudioSceneTools.TOOL_SCREENSHOT:
 		outcome = await tools.execute_screenshot(args)
+	elif tool_name == AgenticStudioSceneTools.TOOL_EDITOR_SCREENSHOT:
+		outcome = await tools.execute_editor_screenshot(args)
 	else:
 		outcome = tools.execute(tool_name, args)
 	job.append_log(str(outcome.get("log", "")))
@@ -303,6 +305,8 @@ static func _handle_one_plan_tool(
 	var outcome: Dictionary
 	if tool_name == AgenticStudioSceneTools.TOOL_SCREENSHOT:
 		outcome = await tools.execute_screenshot(args)
+	elif tool_name == AgenticStudioSceneTools.TOOL_EDITOR_SCREENSHOT:
+		outcome = await tools.execute_editor_screenshot(args)
 	else:
 		outcome = tools.execute(tool_name, args)
 	job.append_log(str(outcome.get("log", "")))

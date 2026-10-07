@@ -12,6 +12,7 @@ const LiveFileScript = preload("res://addons/agentic_studio/live_file_check.gd")
 const LiveScreenshotScript = preload("res://addons/agentic_studio/live_screenshot_check.gd")
 const LivePlaySensorScript = preload("res://addons/agentic_studio/live_play_sensor_check.gd")
 const LiveSidecarRunScript = preload("res://addons/agentic_studio/live_sidecar_run_check.gd")
+const LiveEditorOpsScript = preload("res://addons/agentic_studio/live_editor_ops_check.gd")
 const PageStoreScript = preload("res://addons/agentic_studio/page_store.gd")
 const PlayDebuggerScript = preload("res://addons/agentic_studio/play_debugger.gd")
 const PlaySupportScript = preload("res://addons/agentic_studio/play_support.gd")
@@ -52,6 +53,8 @@ func _enter_tree() -> void:
 		call_deferred("_run_live_screenshot_and_quit")
 	elif OS.get_environment("AGENTIC_STUDIO_LIVE_PLAY_SENSOR") == "1":
 		call_deferred("_run_live_play_sensor_and_quit")
+	elif OS.get_environment("AGENTIC_STUDIO_LIVE_EDITOR_OPS") == "1":
+		call_deferred("_run_live_editor_ops_and_quit")
 
 
 func _exit_tree() -> void:
@@ -203,4 +206,19 @@ func _run_live_play_sensor_and_quit() -> void:
 		var hf: PackedStringArray = harness_result.get("failures", PackedStringArray())
 		for f2: String in hf:
 			print("  - ", f2)
+		get_tree().quit(1)
+
+
+func _run_live_editor_ops_and_quit() -> void:
+	await get_tree().create_timer(2.0).timeout
+	var check = LiveEditorOpsScript.new()
+	var result: Dictionary = await check.run()
+	if bool(result.get("ok", false)):
+		print("AgenticStudio live_editor_ops_check: OK")
+		get_tree().quit(0)
+	else:
+		print("AgenticStudio live_editor_ops_check: FAILED")
+		var failures: PackedStringArray = result.get("failures", PackedStringArray())
+		for f: String in failures:
+			print("  - ", f)
 		get_tree().quit(1)

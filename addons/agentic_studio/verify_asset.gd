@@ -85,9 +85,9 @@ func _initialize() -> void:
 		failures.append("character page missing link to asset")
 
 	# Tool list: create_asset is write, not plan
-	if ToolsScript.tool_definitions().size() != 14:
+	if ToolsScript.tool_definitions().size() != 30:
 		failures.append(
-			"expected 14 tools, got %d" % ToolsScript.tool_definitions().size()
+			"expected 30 tools, got %d" % ToolsScript.tool_definitions().size()
 		)
 	if not ToolsScript.is_write_tool("create_asset"):
 		failures.append("create_asset must be a write tool")

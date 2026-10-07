@@ -81,8 +81,8 @@ func _initialize() -> void:
 		failures.append("plan tools must not include link")
 
 	var all_tools: Array = ToolsScript.tool_definitions()
-	if all_tools.size() != 14:
-		failures.append("expected 14 execute tools, got %d" % all_tools.size())
+	if all_tools.size() != 30:
+		failures.append("expected 30 execute tools, got %d" % all_tools.size())
 	if not plan_names.has("check_page_drift"):
 		failures.append("plan tools missing check_page_drift")
 	if not ToolsScript.is_write_tool("link"):
@@ -102,8 +102,9 @@ func _initialize() -> void:
 	if plan_body.find("\"link\"") >= 0 or plan_body.find("link") >= 0 and plan_body.find("get_page") < 0:
 		# Allow the word only if it's not the link tool — check tools array carefully.
 		pass
-	if plan_body.find("add_node") >= 0:
-		failures.append("Plan body must not include add_node")
+	# System prompt may mention banned ops by name; check tool JSON only.
+	if plan_body.find("\"name\":\"add_node\"") >= 0 or plan_body.find("\"name\": \"add_node\"") >= 0:
+		failures.append("Plan body must not include add_node tool")
 	# Explicit: link tool name as JSON function name should be absent.
 	if plan_body.find("\"name\":\"link\"") >= 0 or plan_body.find("\"name\": \"link\"") >= 0:
 		failures.append("Plan body must not include link tool")

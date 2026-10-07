@@ -17,10 +17,10 @@ func _initialize() -> void:
 	if JobScript.mode_from_index(2) != JobScript.MODE_AUTO_APPROVE:
 		failures.append("auto-approve index mapping wrong")
 
-	# Tool definitions: execute has scene + page + file tools; Plan gets reads only.
+	# Tool definitions: execute has legacy + editor ops; Plan stays at prior read set.
 	var tools: Array = ToolsScript.tool_definitions()
-	if tools.size() != 14:
-		failures.append("expected exactly 14 tools, got %d" % tools.size())
+	if tools.size() != 30:
+		failures.append("expected exactly 30 tools, got %d" % tools.size())
 	var names: PackedStringArray = PackedStringArray()
 	for t: Variant in tools:
 		if t is Dictionary:
@@ -32,6 +32,11 @@ func _initialize() -> void:
 		"list_pages", "get_page", "link", "create_asset",
 		"list_dir", "read_file", "write_file", "delete_file",
 		"screenshot", "check_page_drift",
+		"scene_hierarchy", "node_properties", "signal_list", "resource_find",
+		"input_map_list", "log_read", "editor_screenshot",
+		"node_duplicate", "node_rename", "node_reparent", "node_move",
+		"signal_connect", "resource_assign",
+		"script_patch", "script_attach", "input_map_ensure",
 	]:
 		if not names.has(required):
 			failures.append("missing tool %s" % required)
@@ -45,8 +50,12 @@ func _initialize() -> void:
 		failures.append("Plan request must include list_dir and read_file")
 	if plan_body.find("screenshot") < 0:
 		failures.append("Plan request must include screenshot")
-	if plan_body.find("add_node") >= 0 or plan_body.find("play_scene") >= 0:
-		failures.append("Plan request must not include scene tools")
+	# Tool JSON names only (system prompt may mention banned ops by name).
+	for banned_tool: String in ["add_node", "play_scene", "node_reparent", "script_patch"]:
+		var marker: String = "\"name\":\"%s\"" % banned_tool
+		var marker_sp: String = "\"name\": \"%s\"" % banned_tool
+		if plan_body.find(marker) >= 0 or plan_body.find(marker_sp) >= 0:
+			failures.append("Plan request must not include tool %s" % banned_tool)
 	if plan_body.find("\"name\":\"create_asset\"") >= 0 \
 			or plan_body.find("\"name\": \"create_asset\"") >= 0:
 		failures.append("Plan request must not include create_asset tool")

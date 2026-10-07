@@ -13,8 +13,12 @@ const PLAN_SYSTEM_PROMPT: String = (
 	+ "Pages are .tres files under res://studio/characters/ and res://studio/assets/. "
 	+ "Prefer get_page with the page title string (for example Goblin Shaman). "
 	+ "screenshot target is editor_2d, editor_3d, or play (play needs a running game). "
-	+ "Do not call write_file, delete_file, link, create_asset, add_node, set_property, "
-	+ "or any other write tool — those replies are discarded. "
+	+ "Do not call write tools or the Run-only editor ops "
+	+ "(scene_hierarchy, node_*, signal_*, resource_*, input_map_*, log_read, editor_screenshot, "
+	+ "script_patch, script_attach, add_node, set_property, write_file, delete_file, link, "
+	+ "create_asset) — those replies are discarded. "
+	+ "If an editor_screenshot path is already available and this model row has accepts_images, "
+	+ "you may reason about the attached image. "
 	+ "Your plan MUST name: (1) page_id, (2) the intended op for the coder, "
 	+ "(3) the play check that counts as done. "
 	+ "Do not claim you edited the project or performed any write."
@@ -22,20 +26,21 @@ const PLAN_SYSTEM_PROMPT: String = (
 
 const EXECUTE_SYSTEM_PROMPT: String = (
 	"You are executing inside the Godot editor via AgenticStudio. "
-	+ "Planning is not executing. Only these tools exist: "
-	+ "read_scene, add_node, set_property, play_scene, list_pages, get_page, link, "
-	+ "create_asset, list_dir, read_file, write_file, delete_file, screenshot, and check_page_drift. "
+	+ "Planning is not executing. Tools include: "
+	+ "read_scene, scene_hierarchy, node_properties, signal_list, resource_find, "
+	+ "input_map_list, log_read, editor_screenshot, screenshot, "
+	+ "add_node, set_property, node_duplicate, node_rename, node_reparent, node_move, "
+	+ "signal_connect, resource_assign, script_patch, script_attach, input_map_ensure, "
+	+ "play_scene, list_pages, get_page, link, create_asset, list_dir, read_file, "
+	+ "write_file, delete_file, and check_page_drift. "
 	+ "Scene and resource writes require page_id (e.g. goblin_shaman). "
-	+ "create_asset copies the known stand-in GLB into res://inbox/, imports it, "
-	+ "instances it, and links a new asset page from the named character page. "
-	+ "list_dir and read_file inspect text under res://. "
-	+ "write_file creates or replaces a text file under res://; script body always asks. "
-	+ "delete_file removes a page, scene, or script under res:// and always asks. "
-	+ "screenshot captures editor_2d, editor_3d, or play to a PNG path; not a scene write. "
-	+ "To attach a new script to a node: write_file the .gd with page_id, then set_property "
-	+ "path=Node property=script value=res://that_script.gd page_id=.... "
+	+ "script_patch and script_attach always ask and parse-gate before play. "
+	+ "input_map_ensure writes project.godot and always asks (never auto-approves). "
+	+ "signal_connect fails if the method does not exist; it does not write a script. "
+	+ "delete_file always asks. "
+	+ "editor_screenshot is distinct from user://agentic/last_frame.png. "
 	+ "Do not claim a node was added unless add_node or create_asset returned ok. "
-	+ "There is no project-settings tool. At most 4 write tool calls per job."
+	+ "At most 4 write tool calls per job."
 )
 
 const DEFAULT_TIMEOUT_SEC: float = 120.0
@@ -117,12 +122,23 @@ static func planner_response_has_write(content: String, tool_calls: Array) -> bo
 		var name: String = str(fn.get("name", ""))
 		if AgenticStudioSceneTools.is_write_tool(name):
 			return true
-		if not AgenticStudioSceneTools.is_plan_tool(name) and name in [
-			"add_node", "set_property", "write_file", "delete_file", "create_asset", "link"
-		]:
+		if not AgenticStudioSceneTools.is_plan_tool(name) and (
+			AgenticStudioSceneTools.is_write_tool(name)
+			or name in [
+				"add_node", "set_property", "write_file", "delete_file", "create_asset", "link",
+				"node_duplicate", "node_rename", "node_reparent", "node_move",
+				"signal_connect", "resource_assign", "script_patch", "script_attach",
+				"input_map_ensure",
+			]
+		):
 			return true
 	var lower: String = content.to_lower()
-	for marker: String in ['"write_file"', '"delete_file"', '"add_node"', '"set_property"', '"create_asset"']:
+	for marker: String in [
+		'"write_file"', '"delete_file"', '"add_node"', '"set_property"', '"create_asset"',
+		'"node_duplicate"', '"node_rename"', '"node_reparent"', '"node_move"',
+		'"signal_connect"', '"resource_assign"', '"script_patch"', '"script_attach"',
+		'"input_map_ensure"',
+	]:
 		if lower.find(marker) >= 0:
 			return true
 	return false

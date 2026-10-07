@@ -107,6 +107,18 @@ func _dispatch(method: String, params: Dictionary) -> Dictionary:
 			return _call_tool("read_scene", params, false)
 		"check_page_drift":
 			return _call_tool("check_page_drift", params, false)
+		"scene_hierarchy":
+			return _call_tool("scene_hierarchy", params, false)
+		"node_properties":
+			return _call_tool("node_properties", params, false)
+		"signal_list":
+			return _call_tool("signal_list", params, false)
+		"resource_find":
+			return _call_tool("resource_find", params, false)
+		"input_map_list":
+			return _call_tool("input_map_list", params, false)
+		"log_read":
+			return _call_tool("log_read", params, false)
 		"apply_ops":
 			return await _apply_ops(params)
 		"undo_job":
@@ -179,6 +191,8 @@ func _apply_ops(params: Dictionary) -> Dictionary:
 			outcome = await tools.execute_create_asset(args)
 		elif tool_name == AgenticStudioSceneTools.TOOL_SCREENSHOT:
 			outcome = await tools.execute_screenshot(args)
+		elif tool_name == AgenticStudioSceneTools.TOOL_EDITOR_SCREENSHOT:
+			outcome = await tools.execute_editor_screenshot(args)
 		else:
 			outcome = tools.execute(tool_name, args)
 		results.append({

@@ -1593,6 +1593,8 @@ func _run_plan(job: AgenticStudioJob, model: Dictionary) -> void:
 				var outcome: Dictionary
 				if tool_name == AgenticStudioSceneTools.TOOL_SCREENSHOT:
 					outcome = await tools.execute_screenshot(args)
+				elif tool_name == AgenticStudioSceneTools.TOOL_EDITOR_SCREENSHOT:
+					outcome = await tools.execute_editor_screenshot(args)
 				else:
 					outcome = tools.execute(tool_name, args)
 				job.append_log(str(outcome.get("log", "")))
@@ -1757,6 +1759,8 @@ func _handle_tool_call(
 		outcome = await tools.execute_create_asset(args)
 	elif tool_name == AgenticStudioSceneTools.TOOL_SCREENSHOT:
 		outcome = await tools.execute_screenshot(args)
+	elif tool_name == AgenticStudioSceneTools.TOOL_EDITOR_SCREENSHOT:
+		outcome = await tools.execute_editor_screenshot(args)
 	else:
 		outcome = tools.execute(tool_name, args)
 	job.append_log(str(outcome.get("log", "")))

@@ -26,8 +26,8 @@ func _initialize() -> void:
 	var plan_body: String = ClientScript.build_plan_body({"model_name": "x"}, "hi")
 	if plan_body.find("screenshot") < 0:
 		failures.append("Plan body missing screenshot")
-	if ToolsScript.tool_definitions().size() != 14:
-		failures.append("expected 14 tools")
+	if ToolsScript.tool_definitions().size() != 30:
+		failures.append("expected 30 tools")
 	if ToolsScript.plan_tool_definitions().size() != 6:
 		failures.append("expected 6 plan tools")
 

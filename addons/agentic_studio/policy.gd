@@ -40,12 +40,25 @@ static func classify(tool_name: String, args: Dictionary) -> String:
 		"link":
 			# Page-only; not a scene write. Allow without scene confirm.
 			return DECISION_ALLOW
+		# New allow reads
+		"scene_hierarchy", "node_properties", "signal_list", "resource_find", \
+		"input_map_list", "log_read", "editor_screenshot":
+			return DECISION_ALLOW
+		# New allow writes (page_id required by tools; parent under scene root)
+		"node_duplicate", "node_rename", "node_reparent", "node_move", \
+		"signal_connect", "resource_assign":
+			return DECISION_ALLOW
+		# Always confirm — never auto-approve
+		"script_patch", "script_attach", "input_map_ensure":
+			return DECISION_CONFIRM
 		"play_scene", "read_scene", "list_pages", "get_page", "list_dir", "read_file", "screenshot", "check_page_drift":
 			return DECISION_ALLOW
 		_:
 			# project.godot / autoload / rename-style unknowns
 			var lower: String = name.to_lower().replace("-", "_")
-			if lower.find("autoload") >= 0 or lower.find("project") >= 0 or lower.find("rename") >= 0:
+			if lower.find("autoload") >= 0 or lower.find("project") >= 0:
+				return DECISION_CONFIRM
+			if lower.find("delete") >= 0 or lower.find("remove") >= 0:
 				return DECISION_CONFIRM
 			return DECISION_REJECT
 
@@ -74,7 +87,10 @@ static func should_ask(tool_name: String, args: Dictionary, ask_writes: bool) ->
 
 static func _is_write_like(tool_name: String) -> bool:
 	match tool_name:
-		"add_node", "set_property", "link", "create_asset", "write_file", "delete_file":
+		"add_node", "set_property", "link", "create_asset", "write_file", "delete_file", \
+		"node_duplicate", "node_rename", "node_reparent", "node_move", \
+		"signal_connect", "resource_assign", \
+		"script_patch", "script_attach", "input_map_ensure":
 			return true
 		_:
 			return false

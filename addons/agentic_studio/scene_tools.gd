@@ -7,6 +7,7 @@ const PageStoreScript = preload("res://addons/agentic_studio/page_store.gd")
 const AssetSupportScript = preload("res://addons/agentic_studio/asset_support.gd")
 const FileSupportScript = preload("res://addons/agentic_studio/file_support.gd")
 const ScreenshotSupportScript = preload("res://addons/agentic_studio/screenshot_support.gd")
+const EditorOpsScript = preload("res://addons/agentic_studio/editor_ops.gd")
 const PolicyScript = preload("res://addons/agentic_studio/policy.gd")
 
 const TOOL_READ_SCENE: String = "read_scene"
@@ -23,6 +24,7 @@ const TOOL_WRITE_FILE: String = "write_file"
 const TOOL_DELETE_FILE: String = "delete_file"
 const TOOL_SCREENSHOT: String = "screenshot"
 const TOOL_CHECK_PAGE_DRIFT: String = "check_page_drift"
+const TOOL_EDITOR_SCREENSHOT: String = "editor_screenshot"
 
 const BLOCKED_MESSAGE: String = "blocked — confirm later"
 const MAX_WRITES_PER_JOB: int = 4
@@ -50,6 +52,8 @@ var _page_store: RefCounted = PageStoreScript.new()
 ## Kept alive for UndoRedo do/undo methods on file writes/deletes.
 var _file_store: RefCounted = FileSupportScript.new()
 var _shot_support: RefCounted = ScreenshotSupportScript.new()
+## Extra editor ops (hierarchy, signals, script_patch, input_map, …).
+var _editor_ops: RefCounted = EditorOpsScript.new()
 
 
 static func tool_definitions() -> Array:
@@ -177,6 +181,7 @@ static func tool_definitions() -> Array:
 	tools.append_array(page_tool_definitions())
 	tools.append_array(file_tool_definitions())
 	tools.append_array(screenshot_tool_definitions())
+	tools.append_array(EditorOpsScript.new().tool_definitions())
 	return tools
 
 
@@ -391,7 +396,8 @@ static func page_tool_definitions() -> Array:
 
 
 static func plan_tool_definitions() -> Array:
-	## Plan may call list_pages, get_page, list_dir, read_file, screenshot, check_page_drift only.
+	## Plan stays read-only with the existing set. New editor ops are Run/sidecar tools only
+	## (not planner tools). Write-shaped planner replies are still discarded.
 	var out: Array = []
 	for t: Variant in page_tool_definitions():
 		if typeof(t) != TYPE_DICTIONARY:
@@ -420,14 +426,16 @@ static func plan_tool_definitions() -> Array:
 
 
 static func is_write_tool(tool_name: String) -> bool:
-	return (
+	if (
 		tool_name == TOOL_ADD_NODE
 		or tool_name == TOOL_SET_PROPERTY
 		or tool_name == TOOL_LINK
 		or tool_name == TOOL_CREATE_ASSET
 		or tool_name == TOOL_WRITE_FILE
 		or tool_name == TOOL_DELETE_FILE
-	)
+	):
+		return true
+	return EditorOpsScript.is_write_tool(tool_name)
 
 
 static func is_always_confirm_tool(tool_name: String, args: Dictionary = {}) -> bool:
@@ -447,7 +455,7 @@ static func is_plan_tool(tool_name: String) -> bool:
 
 
 static func is_allowed_tool(tool_name: String) -> bool:
-	return (
+	if (
 		tool_name == TOOL_READ_SCENE
 		or tool_name == TOOL_ADD_NODE
 		or tool_name == TOOL_SET_PROPERTY
@@ -462,7 +470,9 @@ static func is_allowed_tool(tool_name: String) -> bool:
 		or tool_name == TOOL_DELETE_FILE
 		or tool_name == TOOL_SCREENSHOT
 		or tool_name == TOOL_CHECK_PAGE_DRIFT
-	)
+	):
+		return true
+	return EditorOpsScript.is_read_tool(tool_name) or EditorOpsScript.is_write_tool(tool_name)
 
 
 static func is_blocked_tool(tool_name: String) -> bool:
@@ -492,6 +502,9 @@ func setup(p_job_id: String, p_session_id: String = "") -> void:
 	_page_store = PageStoreScript.new()
 	_file_store = FileSupportScript.new()
 	_shot_support = ScreenshotSupportScript.new()
+	_editor_ops = EditorOpsScript.new()
+	if _editor_ops.has_method("bind_tools"):
+		_editor_ops.call("bind_tools", self)
 
 
 func has_writes() -> bool:
@@ -612,7 +625,29 @@ func execute(tool_name: String, args: Dictionary) -> Dictionary:
 			)
 		TOOL_DELETE_FILE:
 			return _delete_file(str(args.get("path", "")))
+		TOOL_EDITOR_SCREENSHOT:
+			return {
+				"ok": false,
+				"blocked": false,
+				"skipped": false,
+				"wrote": false,
+				"error": "editor_screenshot requires async execute_editor_screenshot",
+				"log": "editor_screenshot failed: use async path",
+				"result": {"ok": false, "error": "editor_screenshot requires async execute_editor_screenshot"},
+			}
 		_:
+			if EditorOpsScript.is_read_tool(tool_name) or EditorOpsScript.is_write_tool(tool_name):
+				if EditorOpsScript.requires_page_id(tool_name):
+					var page_res: Dictionary = _require_page_id(str(args.get("page_id", "")))
+					if not bool(page_res.get("ok", false)):
+						return _page_id_failure(
+							tool_name, str(page_res.get("error", "page_id required"))
+						)
+					# Normalize page_id in args for the op implementation.
+					var args2: Dictionary = args.duplicate()
+					args2["page_id"] = str(page_res.get("page_id", ""))
+					return _editor_ops.call("execute", tool_name, args2)
+				return _editor_ops.call("execute", tool_name, args)
 			return {
 				"ok": false,
 				"blocked": true,
@@ -646,6 +681,17 @@ func _note_write(scene_or_script: bool = false) -> void:
 	_write_ops += 1
 	if scene_or_script:
 		_scene_wrote = true
+
+
+func execute_editor_screenshot(args: Dictionary = {}) -> Dictionary:
+	## Async editor-only shot; distinct file from user://agentic/last_frame.png.
+	_record_op(TOOL_EDITOR_SCREENSHOT, args)
+	var outcome: Dictionary = await _editor_ops.call("execute_editor_screenshot", session_id)
+	if bool(outcome.get("ok", false)):
+		var path: String = str(outcome.get("shot_path", outcome.get("result", {}).get("path", "")))
+		if not path.is_empty():
+			pending_shot_paths.append(path)
+	return outcome
 
 
 func execute_screenshot(args: Dictionary) -> Dictionary:
