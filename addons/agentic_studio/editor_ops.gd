@@ -32,7 +32,7 @@ func plan_tool_definitions() -> Array:
 
 static func is_read_tool(tool_name: String) -> bool:
 	match tool_name:
-		"scene_hierarchy", "node_properties", "signal_list", "resource_find", \
+		"scene_hierarchy", "node_properties", "class_get", "signal_list", "resource_find", \
 		"input_map_list", "log_read", "editor_screenshot":
 			return true
 		_:
@@ -69,6 +69,8 @@ func execute(tool_name: String, args: Dictionary) -> Dictionary:
 			return scene_hierarchy(args)
 		"node_properties":
 			return node_properties(args)
+		"class_get":
+			return class_get(args)
 		"signal_list":
 			return signal_list(args)
 		"resource_find":
@@ -158,6 +160,66 @@ func node_properties(args: Dictionary) -> Dictionary:
 		"properties": props,
 	}
 	return _ok("node_properties", payload, "node_properties ok path=%s props=%d" % [path, props.size()])
+
+
+func class_get(args: Dictionary) -> Dictionary:
+	## One class name → short property/signal/method lists. No browse. No multi-class.
+	## Results must not be dumped into session jsonl (caller records tool name only).
+	if args.has("classes") or args.has("names"):
+		return _fail("class_get", "one class only — do not pass multiple classes")
+	var raw: String = str(args.get("class", args.get("name", args.get("type", "")))).strip_edges()
+	if raw.is_empty():
+		return _fail("class_get", "class is required")
+	if raw.find(",") >= 0 or raw.find(" ") >= 0 or raw.find(";") >= 0:
+		return _fail("class_get", "one class only — second class rejected")
+	if not ClassDB.class_exists(raw):
+		return _fail("class_get", "unknown class: %s" % raw)
+	# Include inherited members (no_inheritance=false) but keep lists short.
+	var props: Array = []
+	for info: Dictionary in ClassDB.class_get_property_list(raw, false):
+		var pname: String = str(info.get("name", ""))
+		if pname.is_empty():
+			continue
+		var usage: int = int(info.get("usage", 0))
+		if (usage & PROPERTY_USAGE_CATEGORY) != 0:
+			continue
+		if (usage & PROPERTY_USAGE_GROUP) != 0 or (usage & PROPERTY_USAGE_SUBGROUP) != 0:
+			continue
+		if (usage & PROPERTY_USAGE_STORAGE) == 0 and (usage & PROPERTY_USAGE_EDITOR) == 0:
+			continue
+		props.append(pname)
+		if props.size() >= 48:
+			break
+	var signals_out: Array = []
+	for sig: Dictionary in ClassDB.class_get_signal_list(raw, false):
+		var sname: String = str(sig.get("name", ""))
+		if sname.is_empty():
+			continue
+		signals_out.append(sname)
+		if signals_out.size() >= 24:
+			break
+	var methods_out: Array = []
+	for meth: Dictionary in ClassDB.class_get_method_list(raw, false):
+		var mname: String = str(meth.get("name", ""))
+		if mname.is_empty() or mname.begins_with("_"):
+			continue
+		methods_out.append(mname)
+		if methods_out.size() >= 32:
+			break
+	var payload: Dictionary = {
+		"ok": true,
+		"class": raw,
+		"properties": props,
+		"signals": signals_out,
+		"methods": methods_out,
+	}
+	return _ok(
+		"class_get",
+		payload,
+		"class_get ok class=%s props=%d signals=%d methods=%d" % [
+			raw, props.size(), signals_out.size(), methods_out.size()
+		]
+	)
 
 
 func signal_list(args: Dictionary) -> Dictionary:
@@ -888,7 +950,8 @@ func _read_tool_definitions() -> Array:
 				"additionalProperties": false,
 			}),
 		_fn("node_properties",
-			"Full property snapshot of one node by path relative to the scene root. Read-only.",
+			"Full property snapshot of one node by path relative to the scene root. "
+			+ "Use before set_property or resource_assign. Read-only.",
 			{
 				"type": "object",
 				"properties": {
@@ -897,8 +960,21 @@ func _read_tool_definitions() -> Array:
 				"required": ["path"],
 				"additionalProperties": false,
 			}),
+		_fn("class_get",
+			"One Godot class name → short lists of properties, signals, and methods. "
+			+ "Call only after node_properties when a property or method is uncertain. "
+			+ "Do not browse. One class per call. Local knowledge covers Node3D, MeshInstance3D, "
+			+ "CollisionShape3D, Camera3D, and the cited page script — everything else uses class_get.",
+			{
+				"type": "object",
+				"properties": {
+					"class": {"type": "string", "description": "Single Godot class name, e.g. MeshInstance3D"},
+				},
+				"required": ["class"],
+				"additionalProperties": false,
+			}),
 		_fn("signal_list",
-			"Signals on one node, including existing connections. Read-only.",
+			"Signals on one node, including existing connections. Use before signal_connect. Read-only.",
 			{
 				"type": "object",
 				"properties": {

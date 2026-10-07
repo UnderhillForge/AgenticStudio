@@ -17,22 +17,24 @@ func _initialize() -> void:
 	if JobScript.mode_from_index(2) != JobScript.MODE_AUTO_APPROVE:
 		failures.append("auto-approve index mapping wrong")
 
-	# Tool definitions: execute has legacy + editor ops; Plan stays at prior read set.
+	# Coder catalog (play_scene is plugin gate, not a model tool). Plan has reads only.
 	var tools: Array = ToolsScript.tool_definitions()
-	if tools.size() != 30:
-		failures.append("expected exactly 30 tools, got %d" % tools.size())
+	if tools.size() != 29:
+		failures.append("expected exactly 29 tools, got %d" % tools.size())
 	var names: PackedStringArray = PackedStringArray()
 	for t: Variant in tools:
 		if t is Dictionary:
 			var fn: Variant = (t as Dictionary).get("function", {})
 			if fn is Dictionary:
 				names.append(str((fn as Dictionary).get("name", "")))
+	if names.has("play_scene"):
+		failures.append("play_scene must not be a model tool")
 	for required: String in [
-		"read_scene", "add_node", "set_property", "play_scene",
+		"add_node", "set_property",
 		"list_pages", "get_page", "link", "create_asset",
 		"list_dir", "read_file", "write_file", "delete_file",
 		"screenshot", "check_page_drift",
-		"scene_hierarchy", "node_properties", "signal_list", "resource_find",
+		"scene_hierarchy", "node_properties", "class_get", "signal_list", "resource_find",
 		"input_map_list", "log_read", "editor_screenshot",
 		"node_duplicate", "node_rename", "node_reparent", "node_move",
 		"signal_connect", "resource_assign",
@@ -40,6 +42,11 @@ func _initialize() -> void:
 	]:
 		if not names.has(required):
 			failures.append("missing tool %s" % required)
+	var plan_tools: Array = ToolsScript.plan_tool_definitions()
+	if plan_tools.size() != 14:
+		failures.append("expected 14 plan tools, got %d" % plan_tools.size())
+	if not ToolsScript.is_plan_tool("class_get"):
+		failures.append("class_get must be a plan tool")
 
 	var plan_body: String = ClientScript.build_plan_body({
 		"model_name": "x",
@@ -72,10 +79,10 @@ func _initialize() -> void:
 	var exec_body: String = ClientScript.build_chat_body({
 		"model_name": "x",
 	}, exec_messages, true)
-	if exec_body.find("read_scene") < 0:
-		failures.append("execute chat body missing tools")
-	if exec_body.find("play_scene") < 0:
-		failures.append("execute chat body missing play_scene")
+	if exec_body.find("\"name\":\"class_get\"") < 0 and exec_body.find("\"name\": \"class_get\"") < 0:
+		failures.append("execute chat body missing class_get tool")
+	if exec_body.find("\"name\":\"play_scene\"") >= 0 or exec_body.find("\"name\": \"play_scene\"") >= 0:
+		failures.append("execute chat body must not expose play_scene as a model tool")
 	if exec_body.find("list_pages") < 0 or exec_body.find("link") < 0:
 		failures.append("execute chat body missing page tools")
 	if exec_body.find("\"name\":\"create_asset\"") < 0 \
@@ -83,11 +90,8 @@ func _initialize() -> void:
 		failures.append("execute chat body missing create_asset tool")
 	if exec_body.find("write_file") < 0 or exec_body.find("delete_file") < 0:
 		failures.append("execute chat body missing file tools")
-	if exec_body.find("Planning is not executing") < 0 \
-			and exec_body.find("planning is not executing") < 0:
-		# JSON may escape; check lowercase fragment
-		if exec_body.to_lower().find("planning is not executing") < 0:
-			failures.append("execute system prompt missing from body")
+	if exec_body.find("plugin gate") < 0 and exec_body.to_lower().find("plugin gate") < 0:
+		failures.append("execute system prompt missing from body")
 
 	# Parse tool calls from a synthetic OpenAI response
 	var sample: String = """

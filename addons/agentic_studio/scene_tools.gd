@@ -57,26 +57,17 @@ var _editor_ops: RefCounted = EditorOpsScript.new()
 
 
 static func tool_definitions() -> Array:
+	## Coder catalog. play_scene is the plugin gate after allow-class writes — not a model tool.
+	## read_scene is superseded by scene_hierarchy for model-facing lists.
 	var tools: Array = [
-		{
-			"type": "function",
-			"function": {
-				"name": TOOL_READ_SCENE,
-				"description": "Read the open edited scene: file path, root name, and direct child names. No writes.",
-				"parameters": {
-					"type": "object",
-					"properties": {},
-					"additionalProperties": false,
-				},
-			},
-		},
 		{
 			"type": "function",
 			"function": {
 				"name": TOOL_ADD_NODE,
 				"description": (
 					"Add a child node of the given Godot type and name under the current scene root. "
-					+ "Requires page_id. Sets metadata agentic_page on the node."
+					+ "Requires page_id. Sets metadata agentic_page on the node. "
+					+ "Prefer Node3D / MeshInstance3D / CollisionShape3D / Camera3D unless class_get says otherwise."
 				),
 				"parameters": {
 					"type": "object",
@@ -104,8 +95,9 @@ static func tool_definitions() -> Array:
 			"function": {
 				"name": TOOL_SET_PROPERTY,
 				"description": (
-					"Set one property on an existing node identified by path relative to the scene root. "
-					+ "Requires page_id. Sets metadata agentic_page on the node."
+					"Set one property on an existing node by path from the scene root. "
+					+ "Requires page_id. Call node_properties first; properties absent from that "
+					+ "snapshot are rejected. property=script is confirm, not allow."
 				),
 				"parameters": {
 					"type": "object",
@@ -127,21 +119,6 @@ static func tool_definitions() -> Array:
 						},
 					},
 					"required": ["path", "property", "value", "page_id"],
-					"additionalProperties": false,
-				},
-			},
-		},
-		{
-			"type": "function",
-			"function": {
-				"name": TOOL_PLAY_SCENE,
-				"description": (
-					"Play the edited scene via the play gate: parse, save, PlayProbe frame, "
-					+ "debugger session stop. Returns structured errors and frame path. No file write."
-				),
-				"parameters": {
-					"type": "object",
-					"properties": {},
 					"additionalProperties": false,
 				},
 			},
@@ -221,8 +198,8 @@ static func file_tool_definitions() -> Array:
 			"function": {
 				"name": TOOL_LIST_DIR,
 				"description": (
-					"List files and directories under a res:// path. Read-only. "
-					+ "Use to discover scripts, scenes, and pages before reading them."
+					"List files under a res:// path the cited page points at (page file, links, "
+					+ "image_paths, or their directories). Call get_page first. Not a project-wide search."
 				),
 				"parameters": {
 					"type": "object",
@@ -241,8 +218,8 @@ static func file_tool_definitions() -> Array:
 			"function": {
 				"name": TOOL_READ_FILE,
 				"description": (
-					"Read a text file under res:// (scripts, scenes as text, pages, etc.). "
-					+ "Read-only. Refuses binary files and user://."
+					"Read a text file under res:// that a cited page points at. "
+					+ "Call get_page first. Not a project-wide search. Refuses user://."
 				),
 				"parameters": {
 					"type": "object",
@@ -396,8 +373,7 @@ static func page_tool_definitions() -> Array:
 
 
 static func plan_tool_definitions() -> Array:
-	## Plan stays read-only with the existing set. New editor ops are Run/sidecar tools only
-	## (not planner tools). Write-shaped planner replies are still discarded.
+	## Planner catalog: reads only. Write-shaped planner replies are discarded.
 	var out: Array = []
 	for t: Variant in page_tool_definitions():
 		if typeof(t) != TYPE_DICTIONARY:
@@ -422,6 +398,7 @@ static func plan_tool_definitions() -> Array:
 		if name2 == TOOL_LIST_DIR or name2 == TOOL_READ_FILE:
 			out.append(t2)
 	out.append_array(screenshot_tool_definitions())
+	out.append_array(EditorOpsScript.new().plan_tool_definitions())
 	return out
 
 
@@ -444,14 +421,16 @@ static func is_always_confirm_tool(tool_name: String, args: Dictionary = {}) -> 
 
 
 static func is_plan_tool(tool_name: String) -> bool:
-	return (
+	if (
 		tool_name == TOOL_LIST_PAGES
 		or tool_name == TOOL_GET_PAGE
 		or tool_name == TOOL_LIST_DIR
 		or tool_name == TOOL_READ_FILE
 		or tool_name == TOOL_SCREENSHOT
 		or tool_name == TOOL_CHECK_PAGE_DRIFT
-	)
+	):
+		return true
+	return EditorOpsScript.is_read_tool(tool_name)
 
 
 static func is_allowed_tool(tool_name: String) -> bool:
@@ -1140,9 +1119,21 @@ func _set_property(
 			"log": "set_property failed: %s" % err_path["error"],
 			"result": err_path,
 		}
-	if not property in node:
-		# Allow slash-free engine properties via get/set even when `in` is false for some.
-		pass
+	# Reject properties absent from the node snapshot (same filter as node_properties).
+	if not _node_snapshot_has_property(node, property):
+		var err_snap: Dictionary = {
+			"ok": false,
+			"error": "property absent from node snapshot: %s" % property,
+		}
+		return {
+			"ok": false,
+			"blocked": false,
+			"skipped": false,
+			"wrote": false,
+			"error": err_snap["error"],
+			"log": "set_property failed: %s" % err_snap["error"],
+			"result": err_snap,
+		}
 
 	var coerced: Variant = _coerce_property_value(property, value)
 	if typeof(coerced) == TYPE_DICTIONARY and bool((coerced as Dictionary).get("_error", false)):
@@ -1273,15 +1264,19 @@ func _get_page(path_or_title: String) -> Dictionary:
 			"log": "get_page failed: %s" % err_missing["error"],
 			"result": err_missing,
 		}
+	var page_path: String = str(page.resource_path)
+	var slug: String = page_path.get_file().get_basename()
+	_note_page(slug)
 	var payload: Dictionary = {
 		"ok": true,
-		"path": str(page.resource_path),
+		"path": page_path,
 		"title": str(page.get("title")),
 		"kind": str(page.get("kind")),
 		"notes": str(page.get("notes")),
 		"tags": Array(PackedStringArray(page.get("tags"))),
 		"image_paths": Array(PackedStringArray(page.get("image_paths"))),
 		"links": Array(PackedStringArray(page.get("links"))),
+		"page_id": slug,
 	}
 	return {
 		"ok": true,
@@ -1351,7 +1346,18 @@ func _link(from_ref: String, to_ref: String) -> Dictionary:
 
 
 func _list_dir(path: String) -> Dictionary:
-	var listed: Dictionary = FileSupportScript.list_dir(path)
+	var gate: Dictionary = _require_page_scoped_path(path)
+	if not bool(gate.get("ok", false)):
+		return {
+			"ok": false,
+			"blocked": false,
+			"skipped": false,
+			"wrote": false,
+			"error": str(gate.get("error", "path not allowed")),
+			"log": "list_dir failed: %s" % str(gate.get("error", "")),
+			"result": {"ok": false, "error": str(gate.get("error", ""))},
+		}
+	var listed: Dictionary = FileSupportScript.list_dir(str(gate.get("path", path)))
 	if not bool(listed.get("ok", false)):
 		return {
 			"ok": false,
@@ -1380,7 +1386,18 @@ func _list_dir(path: String) -> Dictionary:
 
 
 func _read_file(path: String) -> Dictionary:
-	var read_out: Dictionary = FileSupportScript.read_text_file(path)
+	var gate: Dictionary = _require_page_scoped_path(path)
+	if not bool(gate.get("ok", false)):
+		return {
+			"ok": false,
+			"blocked": false,
+			"skipped": false,
+			"wrote": false,
+			"error": str(gate.get("error", "path not allowed")),
+			"log": "read_file failed: %s" % str(gate.get("error", "")),
+			"result": {"ok": false, "error": str(gate.get("error", ""))},
+		}
+	var read_out: Dictionary = FileSupportScript.read_text_file(str(gate.get("path", path)))
 	if not bool(read_out.get("ok", false)):
 		return {
 			"ok": false,
@@ -1506,11 +1523,115 @@ func _delete_file(path: String) -> Dictionary:
 
 
 func _record_op(tool_name: String, args: Dictionary) -> void:
+	## Session jsonl gets op name + page id — never a class_get dump or secrets.
 	var summary: Dictionary = {"tool": tool_name}
-	for key: String in ["page_id", "path", "name", "type", "property", "character", "from", "to", "target"]:
+	if tool_name == "class_get":
+		var cls: String = str(args.get("class", args.get("name", args.get("type", "")))).strip_edges()
+		if not cls.is_empty():
+			summary["class"] = cls
+		ops_log.append(summary)
+		return
+	for key: String in ["page_id", "path", "name", "type", "property", "character", "from", "to", "target", "class"]:
 		if args.has(key):
 			summary[key] = args[key]
 	ops_log.append(summary)
+
+
+func _node_snapshot_has_property(node: Node, property: String) -> bool:
+	## Same property filter as node_properties / class_get storage+editor props.
+	if node == null or property.strip_edges().is_empty():
+		return false
+	for info: Dictionary in node.get_property_list():
+		var pname: String = str(info.get("name", ""))
+		if pname != property:
+			continue
+		var usage: int = int(info.get("usage", 0))
+		if (usage & PROPERTY_USAGE_CATEGORY) != 0:
+			continue
+		if (usage & PROPERTY_USAGE_GROUP) != 0 or (usage & PROPERTY_USAGE_SUBGROUP) != 0:
+			continue
+		if (usage & PROPERTY_USAGE_STORAGE) == 0 and (usage & PROPERTY_USAGE_EDITOR) == 0:
+			continue
+		return true
+	return false
+
+
+func _require_page_scoped_path(path: String) -> Dictionary:
+	## list_dir / read_file: only paths a cited page points at (not project-wide search).
+	if cited_page_ids.is_empty():
+		return {
+			"ok": false,
+			"error": "cite a page with get_page before list_dir/read_file",
+			"path": "",
+		}
+	var norm: Dictionary = FileSupportScript.normalize_res_path(
+		path if not path.strip_edges().is_empty() else "res://"
+	)
+	if not bool(norm.get("ok", false)):
+		return {"ok": false, "error": str(norm.get("error", "bad path")), "path": ""}
+	var res_path: String = str(norm["path"])
+	var allowed: PackedStringArray = _cited_page_paths()
+	if allowed.is_empty():
+		return {
+			"ok": false,
+			"error": "cited pages have no readable paths yet — call get_page first",
+			"path": "",
+		}
+	for root_path: String in allowed:
+		if res_path == root_path:
+			return {"ok": true, "path": res_path, "error": ""}
+		var prefix: String = root_path if root_path.ends_with("/") else root_path + "/"
+		if res_path.begins_with(prefix):
+			return {"ok": true, "path": res_path, "error": ""}
+		# Allow listing the directory that contains a pointed-at file.
+		if root_path.begins_with(res_path.rstrip("/") + "/") or root_path.get_base_dir() == res_path.rstrip("/"):
+			return {"ok": true, "path": res_path, "error": ""}
+	return {
+		"ok": false,
+		"error": "path not pointed at by a cited page: %s" % res_path,
+		"path": "",
+	}
+
+
+func _cited_page_paths() -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	for pid: String in cited_page_ids:
+		var resolved: String = PageStoreScript.resolve_page_path(pid)
+		if resolved.is_empty():
+			continue
+		_append_unique_path(out, resolved)
+		_append_unique_path(out, resolved.get_base_dir())
+		var page: Resource = PageStoreScript.load_page(resolved)
+		if page == null:
+			continue
+		for img: String in PackedStringArray(page.get("image_paths")):
+			var ip: String = str(img).strip_edges()
+			if ip.is_empty():
+				continue
+			_append_unique_path(out, ip)
+			_append_unique_path(out, ip.get_base_dir())
+		for link: String in PackedStringArray(page.get("links")):
+			var lp: String = str(link).strip_edges()
+			if lp.is_empty():
+				continue
+			var link_resolved: String = PageStoreScript.resolve_page_path(lp)
+			if link_resolved.is_empty():
+				link_resolved = lp
+			_append_unique_path(out, link_resolved)
+			_append_unique_path(out, link_resolved.get_base_dir())
+	return out
+
+
+func _append_unique_path(out: PackedStringArray, path: String) -> void:
+	var p: String = path.strip_edges().replace("\\", "/")
+	if p.is_empty():
+		return
+	if not p.begins_with("res://"):
+		return
+	for existing: String in out:
+		if existing == p:
+			return
+	out.append(p)
 
 
 func _note_page(page_id: String) -> void:

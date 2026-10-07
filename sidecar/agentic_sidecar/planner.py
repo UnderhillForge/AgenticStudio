@@ -17,14 +17,18 @@ from .user_config import (
 )
 
 PLAN_SYSTEM = (
-    "You are the AgenticStudio planner. You do not apply ops and you never write "
-    "scenes, project.godot, or autoloads. "
-    "You may ask the sidecar to call list_pages, get_page, read_scene, and "
-    "check_page_drift via the plugin. "
+    "You are the AgenticStudio planner. You never receive the apply API and never write "
+    "scenes, project.godot, or autoloads. Write-shaped replies are discarded. "
+    "Local class knowledge is only Node3D, MeshInstance3D, CollisionShape3D, Camera3D, "
+    "and the cited page's script — everything else goes through class_get. "
+    "Do not load or dump a full Godot class index. "
+    "Start with list_pages/get_page. Use check_page_drift, scene_hierarchy, node_properties, "
+    "class_get (one class, only after node_properties when uncertain), signal_list, "
+    "resource_find, input_map_list, list_dir/read_file (only paths a cited page points at), "
+    "log_read, editor_screenshot/screenshot as needed. "
     "Your plan MUST name: (1) page_id, (2) the intended op for the coder, "
     "(3) the play check that counts as done. "
-    "Do not claim you edited the scene. Quote page notes when asked. "
-    "Any write_file / add_node / set_property in your reply is discarded."
+    "Do not claim you edited the scene. Quote page notes when asked."
 )
 
 _WRITE_MARKERS = (
@@ -33,6 +37,15 @@ _WRITE_MARKERS = (
     '"add_node"',
     '"set_property"',
     '"create_asset"',
+    '"node_duplicate"',
+    '"node_rename"',
+    '"node_reparent"',
+    '"node_move"',
+    '"signal_connect"',
+    '"resource_assign"',
+    '"script_patch"',
+    '"script_attach"',
+    '"input_map_ensure"',
 )
 
 

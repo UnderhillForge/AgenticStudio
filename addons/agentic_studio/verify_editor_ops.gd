@@ -13,22 +13,22 @@ func _initialize() -> void:
 	var failures: PackedStringArray = PackedStringArray()
 
 	# --- Counts ---
-	if ToolsScript.tool_definitions().size() != 30:
-		failures.append("expected 30 tools, got %d" % ToolsScript.tool_definitions().size())
-	if ToolsScript.plan_tool_definitions().size() != 6:
-		failures.append("plan tools must stay 6, got %d" % ToolsScript.plan_tool_definitions().size())
+	if ToolsScript.tool_definitions().size() != 29:
+		failures.append("expected 29 tools, got %d" % ToolsScript.tool_definitions().size())
+	if ToolsScript.plan_tool_definitions().size() != 14:
+		failures.append("plan tools expected 14, got %d" % ToolsScript.plan_tool_definitions().size())
 
-	# --- New ops are allowed, not plan tools ---
+	# --- Catalog reads are plan + coder tools ---
 	for read_name: String in [
-		"scene_hierarchy", "node_properties", "signal_list", "resource_find",
+		"scene_hierarchy", "node_properties", "class_get", "signal_list", "resource_find",
 		"input_map_list", "log_read", "editor_screenshot",
 	]:
 		if not ToolsScript.is_allowed_tool(read_name):
 			failures.append("%s must be allowed" % read_name)
 		if ToolsScript.is_write_tool(read_name):
 			failures.append("%s must not be a write" % read_name)
-		if ToolsScript.is_plan_tool(read_name):
-			failures.append("%s must not be a plan tool" % read_name)
+		if not ToolsScript.is_plan_tool(read_name):
+			failures.append("%s must be a plan tool" % read_name)
 		if PolicyScript.classify(read_name, {}) != PolicyScript.DECISION_ALLOW:
 			failures.append("%s policy must allow" % read_name)
 
@@ -73,11 +73,16 @@ func _initialize() -> void:
 	):
 		failures.append("model id must not change policy")
 
-	# --- Plan body excludes new writes ---
+	# --- Plan body includes reads, excludes writes ---
 	var plan_body: String = ClientScript.build_plan_body({"model_name": "x"}, "hi")
+	for required_read: String in ["scene_hierarchy", "class_get", "node_properties"]:
+		var rm: String = "\"name\":\"%s\"" % required_read
+		var rm_sp: String = "\"name\": \"%s\"" % required_read
+		if plan_body.find(rm) < 0 and plan_body.find(rm_sp) < 0:
+			failures.append("Plan tools JSON missing %s" % required_read)
 	for banned: String in [
 		'"name":"node_reparent"', '"name":"script_patch"', '"name":"input_map_ensure"',
-		'"name":"signal_connect"', '"name":"scene_hierarchy"',
+		'"name":"signal_connect"', '"name":"add_node"', '"name":"play_scene"',
 	]:
 		if plan_body.find(banned) >= 0 or plan_body.find(banned.replace('":"', '": "')) >= 0:
 			failures.append("Plan tools JSON must not include %s" % banned)

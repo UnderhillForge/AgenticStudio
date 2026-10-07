@@ -40,15 +40,15 @@ static func classify(tool_name: String, args: Dictionary) -> String:
 		"link":
 			# Page-only; not a scene write. Allow without scene confirm.
 			return DECISION_ALLOW
-		# New allow reads
-		"scene_hierarchy", "node_properties", "signal_list", "resource_find", \
+		# Catalog reads (planner + coder)
+		"scene_hierarchy", "node_properties", "class_get", "signal_list", "resource_find", \
 		"input_map_list", "log_read", "editor_screenshot":
 			return DECISION_ALLOW
-		# New allow writes (page_id required by tools; parent under scene root)
+		# Catalog allow writes (coder; page_id required by tools; parent under scene root)
 		"node_duplicate", "node_rename", "node_reparent", "node_move", \
 		"signal_connect", "resource_assign":
 			return DECISION_ALLOW
-		# Always confirm — never auto-approve
+		# Catalog confirm writes — never auto-approve
 		"script_patch", "script_attach", "input_map_ensure":
 			return DECISION_CONFIRM
 		"play_scene", "read_scene", "list_pages", "get_page", "list_dir", "read_file", "screenshot", "check_page_drift":

@@ -216,6 +216,40 @@ func run() -> Dictionary:
 		failures.append("rejected rename still changed the scene")
 	nopage.discard_if_empty()
 
+	# --- set_property of property absent from node snapshot rejected ---
+	var snap_tools := AgenticStudioSceneTools.new()
+	snap_tools.setup("live_editor_ops_snap")
+	var bad_prop: Dictionary = snap_tools.execute(
+		"set_property",
+		{
+			"path": "ParentA",
+			"property": "this_property_does_not_exist_xyz",
+			"value": 1,
+			"page_id": PAGE_ID,
+		}
+	)
+	if bool(bad_prop.get("ok", false)):
+		failures.append("set_property must reject absent snapshot property")
+	if str(bad_prop.get("error", "")).find("snapshot") < 0 \
+			and str(bad_prop.get("log", "")).find("snapshot") < 0:
+		failures.append("absent property error unclear: %s" % str(bad_prop.get("error", "")))
+	snap_tools.discard_if_empty()
+
+	# --- class_get one class ---
+	var cg_tools := AgenticStudioSceneTools.new()
+	cg_tools.setup("live_editor_ops_class")
+	var cg: Dictionary = cg_tools.execute("class_get", {"class": "MeshInstance3D"})
+	if not bool(cg.get("ok", false)):
+		failures.append("class_get MeshInstance3D failed: %s" % str(cg.get("error", "")))
+	else:
+		var cg_props: Array = cg.get("result", {}).get("properties", [])
+		if cg_props.is_empty():
+			failures.append("class_get returned empty properties")
+	var cg2: Dictionary = cg_tools.execute("class_get", {"class": "MeshInstance3D Node3D"})
+	if bool(cg2.get("ok", false)):
+		failures.append("class_get must reject two classes")
+	cg_tools.finish()
+
 	# Cleanup tree leftovers
 	root = EditorInterface.get_edited_scene_root()
 	_remove_child_named(root, "ParentA")

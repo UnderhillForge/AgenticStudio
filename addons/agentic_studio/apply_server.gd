@@ -119,6 +119,8 @@ func _dispatch(method: String, params: Dictionary) -> Dictionary:
 			return _call_tool("input_map_list", params, false)
 		"log_read":
 			return _call_tool("log_read", params, false)
+		"class_get":
+			return _call_tool("class_get", params, false)
 		"apply_ops":
 			return await _apply_ops(params)
 		"undo_job":
