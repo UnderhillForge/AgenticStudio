@@ -13,8 +13,8 @@ func _initialize() -> void:
 	var failures: PackedStringArray = PackedStringArray()
 
 	# --- Counts ---
-	if ToolsScript.tool_definitions().size() != 29:
-		failures.append("expected 29 tools, got %d" % ToolsScript.tool_definitions().size())
+	if ToolsScript.tool_definitions().size() != 31:
+		failures.append("expected 31 tools, got %d" % ToolsScript.tool_definitions().size())
 	if ToolsScript.plan_tool_definitions().size() != 14:
 		failures.append("plan tools expected 14, got %d" % ToolsScript.plan_tool_definitions().size())
 

@@ -26,6 +26,9 @@ PLAN_SYSTEM = (
     "class_get (one class, only after node_properties when uncertain), signal_list, "
     "resource_find, input_map_list, list_dir/read_file (only paths a cited page points at), "
     "log_read, editor_screenshot/screenshot as needed. "
+    "May cite a page image and, after import, the play frame or editor_screenshot when "
+    "accepts_images is set. Do not call image_generate or mesh_from_image. "
+    "Do not receive sampler progress. "
     "Your plan MUST name: (1) page_id, (2) the intended op for the coder, "
     "(3) the play check that counts as done. "
     "Do not claim you edited the scene. Quote page notes when asked."
@@ -37,6 +40,8 @@ _WRITE_MARKERS = (
     '"add_node"',
     '"set_property"',
     '"create_asset"',
+    '"image_generate"',
+    '"mesh_from_image"',
     '"node_duplicate"',
     '"node_rename"',
     '"node_reparent"',

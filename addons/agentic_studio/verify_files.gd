@@ -87,9 +87,9 @@ func _initialize() -> void:
 	elif FileAccess.file_exists(abs_tmp):
 		failures.append("delete_text_file left file on disk")
 
-	# Tool flags (29 coder tools; 14 plan reads including class_get)
-	if ToolsScript.tool_definitions().size() != 29:
-		failures.append("expected 29 tools, got %d" % ToolsScript.tool_definitions().size())
+	# Tool flags (31 coder tools; 14 plan reads including class_get)
+	if ToolsScript.tool_definitions().size() != 31:
+		failures.append("expected 31 tools, got %d" % ToolsScript.tool_definitions().size())
 	if ToolsScript.plan_tool_definitions().size() != 14:
 		failures.append("expected 14 plan tools, got %d" % ToolsScript.plan_tool_definitions().size())
 	if not ToolsScript.is_always_confirm_tool("delete_file"):

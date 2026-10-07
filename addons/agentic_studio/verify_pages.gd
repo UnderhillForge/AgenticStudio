@@ -81,8 +81,8 @@ func _initialize() -> void:
 		failures.append("plan tools must not include link")
 
 	var all_tools: Array = ToolsScript.tool_definitions()
-	if all_tools.size() != 29:
-		failures.append("expected 29 execute tools, got %d" % all_tools.size())
+	if all_tools.size() != 31:
+		failures.append("expected 31 execute tools, got %d" % all_tools.size())
 	if not plan_names.has("class_get"):
 		failures.append("plan tools missing class_get")
 	if not plan_names.has("check_page_drift"):

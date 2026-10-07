@@ -27,6 +27,8 @@ const PLAN_SYSTEM_PROMPT: String = (
 	+ "editor_screenshot — editor viewport; screenshot and user://agentic/last_frame.png are the "
 	+ "running game; attach an image only if this role row has accepts_images; drop the image first "
 	+ "if the context budget is tight. "
+	+ "May cite a page image and, after import, the play frame or editor_screenshot when accepts_images "
+	+ "is set. Do not call image_generate or mesh_from_image. Do not receive sampler progress. "
 	+ "Do not call write tools. Your plan MUST name: (1) page_id, (2) the intended op for the coder, "
 	+ "(3) the play check that counts as done. Do not claim you edited the project."
 )
@@ -49,11 +51,14 @@ const EXECUTE_SYSTEM_PROMPT: String = (
 	+ "node snapshot are rejected); node_duplicate/rename/reparent/move (parent stays under root); "
 	+ "signal_connect to an existing method (missing method fails and does not write a script); "
 	+ "resource_assign from a res:// path; create_asset is the fixture and page-asset path, not a "
-	+ "general importer; link is page-only (not a scene write). "
+	+ "general importer; link is page-only (not a scene write); "
+	+ "image_generate (Draw Things CLI → PNG on the page under res://studio/generated/<page_id>/; "
+	+ "no scene node; fails before spawn if CLI/models/model unset). "
 	+ "Confirm writes (never auto-approve): script_patch/script_attach (parse-gate before play; "
 	+ "failed parse does not play and does not hot-reload over a good script); input_map_ensure "
 	+ "(writes project.godot); write_file/delete_file (prefer script_patch for a script; .tscn "
-	+ "writes and any delete stay confirm). "
+	+ "writes and any delete stay confirm); mesh_from_image (decimate/export a mesh already on "
+	+ "the page — not PNG-to-sculpt; blender_path required; scene link is separate resource_assign). "
 	+ "At most 4 write tool calls per job. Do not claim a write succeeded unless the tool returned ok."
 )
 
@@ -140,6 +145,7 @@ static func planner_response_has_write(content: String, tool_calls: Array) -> bo
 			AgenticStudioSceneTools.is_write_tool(name)
 			or name in [
 				"add_node", "set_property", "write_file", "delete_file", "create_asset", "link",
+				"image_generate", "mesh_from_image",
 				"node_duplicate", "node_rename", "node_reparent", "node_move",
 				"signal_connect", "resource_assign", "script_patch", "script_attach",
 				"input_map_ensure", "play_scene",
@@ -149,6 +155,7 @@ static func planner_response_has_write(content: String, tool_calls: Array) -> bo
 	var lower: String = content.to_lower()
 	for marker: String in [
 		'"write_file"', '"delete_file"', '"add_node"', '"set_property"', '"create_asset"',
+		'"image_generate"', '"mesh_from_image"',
 		'"node_duplicate"', '"node_rename"', '"node_reparent"', '"node_move"',
 		'"signal_connect"', '"resource_assign"', '"script_patch"', '"script_attach"',
 		'"input_map_ensure"',

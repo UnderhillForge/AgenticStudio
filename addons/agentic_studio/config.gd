@@ -17,6 +17,9 @@ const KEY_SELECTED_MODEL: String = "selected_model_id" # legacy alias → coder
 const KEY_SELECTED_PLANNER: String = "selected_planner_id"
 const KEY_SELECTED_CODER: String = "selected_coder_id"
 const KEY_BLENDER_PATH: String = "blender_path"
+const KEY_DRAWTHINGS_CLI: String = "drawthings_cli"
+const KEY_DRAWTHINGS_MODELS_DIR: String = "drawthings_models_dir"
+const KEY_DRAWTHINGS_MODEL: String = "drawthings_model"
 const KEY_MODEL_IDS: String = "ids"
 const KEY_EXTRA_IDS: String = "ids"
 const KEY_OPEN_SESSION_IDS: String = "open_ids"
@@ -132,6 +135,39 @@ static func get_blender_path(cfg: ConfigFile = null) -> String:
 static func set_blender_path(path: String, cfg: ConfigFile = null) -> void:
 	var c: ConfigFile = cfg if cfg != null else load_config()
 	c.set_value(SECTION_TOOLS, KEY_BLENDER_PATH, path)
+	save_config(c)
+
+
+static func get_drawthings_cli(cfg: ConfigFile = null) -> String:
+	var c: ConfigFile = cfg if cfg != null else load_config()
+	return str(c.get_value(SECTION_TOOLS, KEY_DRAWTHINGS_CLI, ""))
+
+
+static func set_drawthings_cli(path: String, cfg: ConfigFile = null) -> void:
+	var c: ConfigFile = cfg if cfg != null else load_config()
+	c.set_value(SECTION_TOOLS, KEY_DRAWTHINGS_CLI, path)
+	save_config(c)
+
+
+static func get_drawthings_models_dir(cfg: ConfigFile = null) -> String:
+	var c: ConfigFile = cfg if cfg != null else load_config()
+	return str(c.get_value(SECTION_TOOLS, KEY_DRAWTHINGS_MODELS_DIR, ""))
+
+
+static func set_drawthings_models_dir(path: String, cfg: ConfigFile = null) -> void:
+	var c: ConfigFile = cfg if cfg != null else load_config()
+	c.set_value(SECTION_TOOLS, KEY_DRAWTHINGS_MODELS_DIR, path)
+	save_config(c)
+
+
+static func get_drawthings_model(cfg: ConfigFile = null) -> String:
+	var c: ConfigFile = cfg if cfg != null else load_config()
+	return str(c.get_value(SECTION_TOOLS, KEY_DRAWTHINGS_MODEL, ""))
+
+
+static func set_drawthings_model(filename: String, cfg: ConfigFile = null) -> void:
+	var c: ConfigFile = cfg if cfg != null else load_config()
+	c.set_value(SECTION_TOOLS, KEY_DRAWTHINGS_MODEL, filename)
 	save_config(c)
 
 

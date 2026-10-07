@@ -19,8 +19,8 @@ func _initialize() -> void:
 
 	# Coder catalog (play_scene is plugin gate, not a model tool). Plan has reads only.
 	var tools: Array = ToolsScript.tool_definitions()
-	if tools.size() != 29:
-		failures.append("expected exactly 29 tools, got %d" % tools.size())
+	if tools.size() != 31:
+		failures.append("expected exactly 31 tools, got %d" % tools.size())
 	var names: PackedStringArray = PackedStringArray()
 	for t: Variant in tools:
 		if t is Dictionary:

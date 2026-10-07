@@ -8,12 +8,16 @@ signal settings_changed
 var _model_list: ItemList
 var _extra_list: ItemList
 var _blender_edit: LineEdit
+var _drawthings_cli_edit: LineEdit
+var _drawthings_models_edit: LineEdit
+var _drawthings_model_edit: LineEdit
 var _planner_picker: OptionButton
 var _coder_picker: OptionButton
 var _models: Array[Dictionary] = []
 var _extras: Array[Dictionary] = []
 var _file_dialog: EditorFileDialog
-var _browse_target: String = "" # "blender" | "extra"
+var _dir_dialog: EditorFileDialog
+var _browse_target: String = "" # "blender" | "drawthings_cli" | "drawthings_models" | "extra"
 var _browse_extra_index: int = -1
 var _suppress_role_signal: bool = false
 
@@ -22,7 +26,7 @@ func _ready() -> void:
 	title = "AgenticStudio Settings"
 	ok_button_text = "Done"
 	dialog_hide_on_ok = true
-	min_size = Vector2i(620, 560)
+	min_size = Vector2i(620, 640)
 	_build_ui()
 	_file_dialog = EditorFileDialog.new()
 	_file_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
@@ -30,6 +34,12 @@ func _ready() -> void:
 	_file_dialog.title = "Select program"
 	_file_dialog.file_selected.connect(_on_file_selected)
 	add_child(_file_dialog)
+	_dir_dialog = EditorFileDialog.new()
+	_dir_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_DIR
+	_dir_dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
+	_dir_dialog.title = "Select models directory"
+	_dir_dialog.dir_selected.connect(_on_dir_selected)
+	add_child(_dir_dialog)
 
 
 func open_settings() -> void:
@@ -138,6 +148,53 @@ func _build_ui() -> void:
 	browse_blender.pressed.connect(_on_browse_blender)
 	blender_row.add_child(browse_blender)
 
+	var sep_dt := HSeparator.new()
+	root.add_child(sep_dt)
+
+	# --- Draw Things (image generate). Paths/model name only in user:// — never hardcoded. ---
+	var dt_label := Label.new()
+	dt_label.text = "Draw Things CLI"
+	root.add_child(dt_label)
+
+	var cli_row := HBoxContainer.new()
+	root.add_child(cli_row)
+	_drawthings_cli_edit = LineEdit.new()
+	_drawthings_cli_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_drawthings_cli_edit.placeholder_text = "Absolute path to draw-things-cli"
+	_drawthings_cli_edit.text_submitted.connect(func(_t: String) -> void: _save_drawthings())
+	_drawthings_cli_edit.focus_exited.connect(_save_drawthings)
+	cli_row.add_child(_drawthings_cli_edit)
+	var browse_cli := Button.new()
+	browse_cli.text = "Browse…"
+	browse_cli.pressed.connect(_on_browse_drawthings_cli)
+	cli_row.add_child(browse_cli)
+
+	var models_lbl := Label.new()
+	models_lbl.text = "Draw Things models directory"
+	root.add_child(models_lbl)
+	var models_row := HBoxContainer.new()
+	root.add_child(models_row)
+	_drawthings_models_edit = LineEdit.new()
+	_drawthings_models_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_drawthings_models_edit.placeholder_text = "Directory the CLI reads models from"
+	_drawthings_models_edit.text_submitted.connect(func(_t: String) -> void: _save_drawthings())
+	_drawthings_models_edit.focus_exited.connect(_save_drawthings)
+	models_row.add_child(_drawthings_models_edit)
+	var browse_models := Button.new()
+	browse_models.text = "Browse…"
+	browse_models.pressed.connect(_on_browse_drawthings_models)
+	models_row.add_child(browse_models)
+
+	var model_lbl := Label.new()
+	model_lbl.text = "Draw Things model filename"
+	root.add_child(model_lbl)
+	_drawthings_model_edit = LineEdit.new()
+	_drawthings_model_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_drawthings_model_edit.placeholder_text = "Checkpoint filename (empty until you set it)"
+	_drawthings_model_edit.text_submitted.connect(func(_t: String) -> void: _save_drawthings())
+	_drawthings_model_edit.focus_exited.connect(_save_drawthings)
+	root.add_child(_drawthings_model_edit)
+
 	var sep2 := HSeparator.new()
 	root.add_child(sep2)
 
@@ -175,6 +232,9 @@ func _reload_from_disk() -> void:
 	_models = AgenticStudioConfig.list_models()
 	_extras = AgenticStudioConfig.list_extra_tools()
 	_blender_edit.text = AgenticStudioConfig.get_blender_path()
+	_drawthings_cli_edit.text = AgenticStudioConfig.get_drawthings_cli()
+	_drawthings_models_edit.text = AgenticStudioConfig.get_drawthings_models_dir()
+	_drawthings_model_edit.text = AgenticStudioConfig.get_drawthings_model()
 	_refresh_model_list()
 	_refresh_role_pickers()
 	_refresh_extra_list()
@@ -232,16 +292,48 @@ func _save_blender() -> void:
 	settings_changed.emit()
 
 
+func _save_drawthings() -> void:
+	AgenticStudioConfig.set_drawthings_cli(_drawthings_cli_edit.text.strip_edges())
+	AgenticStudioConfig.set_drawthings_models_dir(_drawthings_models_edit.text.strip_edges())
+	AgenticStudioConfig.set_drawthings_model(_drawthings_model_edit.text.strip_edges())
+	settings_changed.emit()
+
+
 func _on_browse_blender() -> void:
 	_browse_target = "blender"
 	_browse_extra_index = -1
+	_file_dialog.title = "Select Blender"
+	_file_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
 	_file_dialog.popup_file_dialog()
+
+
+func _on_browse_drawthings_cli() -> void:
+	_browse_target = "drawthings_cli"
+	_browse_extra_index = -1
+	_file_dialog.title = "Select draw-things-cli"
+	_file_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
+	_file_dialog.popup_file_dialog()
+
+
+func _on_browse_drawthings_models() -> void:
+	_browse_target = "drawthings_models"
+	_browse_extra_index = -1
+	_dir_dialog.popup_file_dialog()
+
+
+func _on_dir_selected(path: String) -> void:
+	if _browse_target == "drawthings_models":
+		_drawthings_models_edit.text = path
+		_save_drawthings()
 
 
 func _on_file_selected(path: String) -> void:
 	if _browse_target == "blender":
 		_blender_edit.text = path
 		_save_blender()
+	elif _browse_target == "drawthings_cli":
+		_drawthings_cli_edit.text = path
+		_save_drawthings()
 	elif _browse_target == "extra" and _browse_extra_index >= 0 and _browse_extra_index < _extras.size():
 		var tool: Dictionary = _extras[_browse_extra_index].duplicate(true)
 		tool["path"] = path

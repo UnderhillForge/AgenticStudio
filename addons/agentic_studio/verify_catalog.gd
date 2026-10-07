@@ -32,6 +32,7 @@ func _initialize() -> void:
 	for banned: String in [
 		"add_node", "set_property", "node_reparent", "signal_connect", "script_patch",
 		"input_map_ensure", "write_file", "delete_file", "play_scene", "create_asset", "link",
+		"image_generate", "mesh_from_image",
 	]:
 		if plan_names.has(banned):
 			failures.append("planner must not have %s" % banned)
@@ -83,11 +84,12 @@ func _initialize() -> void:
 	for need2: String in [
 		"class_get", "add_node", "set_property", "node_reparent", "signal_connect",
 		"resource_assign", "script_patch", "input_map_ensure", "create_asset", "link",
+		"image_generate", "mesh_from_image",
 	]:
 		if not coder_names.has(need2):
 			failures.append("coder missing %s" % need2)
-	if coder_tools.size() != 29:
-		failures.append("coder tool count %d want 29" % coder_tools.size())
+	if coder_tools.size() != 31:
+		failures.append("coder tool count %d want 31" % coder_tools.size())
 
 	# --- set_property absent from snapshot rejected (helper) ---
 	if not ToolsScript.new().has_method("_node_snapshot_has_property"):

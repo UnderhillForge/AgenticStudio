@@ -37,6 +37,9 @@ static func classify(tool_name: String, args: Dictionary) -> String:
 		"create_asset":
 			# Instances under root; treat as allow for the scene half (page data is separate).
 			return DECISION_ALLOW
+		"image_generate":
+			# Page images only; no scene node. Allow for coder / sidecar auto-approve.
+			return DECISION_ALLOW
 		"link":
 			# Page-only; not a scene write. Allow without scene confirm.
 			return DECISION_ALLOW
@@ -49,7 +52,7 @@ static func classify(tool_name: String, args: Dictionary) -> String:
 		"signal_connect", "resource_assign":
 			return DECISION_ALLOW
 		# Catalog confirm writes — never auto-approve
-		"script_patch", "script_attach", "input_map_ensure":
+		"script_patch", "script_attach", "input_map_ensure", "mesh_from_image":
 			return DECISION_CONFIRM
 		"play_scene", "read_scene", "list_pages", "get_page", "list_dir", "read_file", "screenshot", "check_page_drift":
 			return DECISION_ALLOW
@@ -87,7 +90,8 @@ static func should_ask(tool_name: String, args: Dictionary, ask_writes: bool) ->
 
 static func _is_write_like(tool_name: String) -> bool:
 	match tool_name:
-		"add_node", "set_property", "link", "create_asset", "write_file", "delete_file", \
+		"add_node", "set_property", "link", "create_asset", "image_generate", "mesh_from_image", \
+		"write_file", "delete_file", \
 		"node_duplicate", "node_rename", "node_reparent", "node_move", \
 		"signal_connect", "resource_assign", \
 		"script_patch", "script_attach", "input_map_ensure":

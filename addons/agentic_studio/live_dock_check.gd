@@ -48,8 +48,11 @@ func run() -> Dictionary:
 	else:
 		var entry: Dictionary = sessions[0]
 		var panel: Node = entry.get("panel")
-		if not (panel is VSplitContainer):
-			failures.append("session panel must be VSplitContainer")
+		var split_node: Node = entry.get("split")
+		if not (panel is VBoxContainer):
+			failures.append("session panel must be VBoxContainer that fills the dock")
+		if not (split_node is VSplitContainer):
+			failures.append("session split must be VSplitContainer")
 		var log_view: TextEdit = entry.get("log") as TextEdit
 		if log_view == null or log_view.editable:
 			failures.append("session log must be read-only TextEdit")
@@ -60,52 +63,66 @@ func run() -> Dictionary:
 			var ph: Control = prompt.get_parent() as Control
 			if ph == null or ph.size_flags_vertical != Control.SIZE_EXPAND_FILL:
 				failures.append("session PromptHost must SIZE_EXPAND_FILL")
-		var toolbar: Control = null
+		var chrome: Control = null
+		var actions: Control = null
 		if panel != null:
-			toolbar = panel.find_child("ComposerToolbar", true, false) as Control
-		if toolbar == null:
-			failures.append("session composer toolbar missing")
-		elif toolbar.size_flags_vertical == Control.SIZE_EXPAND_FILL:
-			failures.append("toolbar must not expand with the split")
+			chrome = panel.find_child("ComposerChrome", true, false) as Control
+			actions = panel.find_child("ComposerActions", true, false) as Control
+		if chrome == null:
+			failures.append("session composer chrome missing")
+		elif chrome.size_flags_vertical == Control.SIZE_EXPAND_FILL:
+			failures.append("composer chrome must not expand with the split")
+		if actions == null:
+			failures.append("session ComposerActions missing")
+		elif split_node != null and actions.get_parent() != null:
+			var p: Node = actions
+			while p != null and p != panel:
+				if p == split_node:
+					failures.append("ComposerActions must not be inside the session VSplit")
+					break
+				p = p.get_parent()
 
-	# Dragging the split should grow prompt height, not toolbar.
+	# Dragging the split should grow prompt height; chrome stays outside the split.
 	var studio_split: VSplitContainer = dock.get("_studio_split") as VSplitContainer
-	if studio_split != null and studio_prompt != null:
-		var toolbar: Control = studio_split.find_child("ComposerToolbar", true, false) as Control
+	var studio_panel_ctrl: Control = dock.get("_studio_panel") as Control
+	if studio_split != null and studio_prompt != null and studio_panel_ctrl != null:
+		var chrome: Control = studio_panel_ctrl.find_child("ComposerChrome", true, false) as Control
 		# Ensure Studio is visible and laid out at a usable height.
 		tab_bar.current_tab = 0
 		await _frames(2)
-		# Give the split a tall floor and leave most height to the composer pane.
+		# Give the split a tall floor and leave most height to the prompt pane.
 		studio_split.custom_minimum_size = Vector2(0, 420)
 		studio_split.split_offset = 48
 		await _frames(3)
-		var composer_root: Control = studio_split.get_child(1) as Control
+		var prompt_pane: Control = studio_split.get_child(1) as Control
 		# Re-resolve PromptHost after any prior refresh.
 		studio_prompt = dock.get("_studio_prompt") as TextEdit
 		studio_prompt_host = studio_prompt.get_parent() as Control if studio_prompt else null
 		var measure: Control = studio_prompt_host if studio_prompt_host != null else studio_prompt
-		# Simulate a taller composer pane (user drag grows this pane; prompt must absorb it).
+		# Simulate a taller prompt pane (user drag grows this pane; prompt must absorb it).
 		var small_min := Vector2(0, 110)
 		var large_min := Vector2(0, 260)
-		composer_root.custom_minimum_size = small_min
+		prompt_pane.custom_minimum_size = small_min
 		await _frames(4)
 		var small_prompt_h: float = measure.size.y
-		var small_toolbar_h: float = toolbar.size.y if toolbar else -1.0
-		composer_root.custom_minimum_size = large_min
+		var small_chrome_h: float = chrome.size.y if chrome else -1.0
+		prompt_pane.custom_minimum_size = large_min
 		await _frames(4)
 		var large_prompt_h: float = measure.size.y
-		var large_toolbar_h: float = toolbar.size.y if toolbar else -1.0
+		var large_chrome_h: float = chrome.size.y if chrome else -1.0
 		if large_prompt_h <= small_prompt_h + 8.0:
 			failures.append(
-				"taller composer did not grow prompt (small=%.1f large=%.1f composer_min=%s split_h=%.1f)"
+				"taller prompt pane did not grow prompt (small=%.1f large=%.1f pane_min=%s split_h=%.1f)"
 				% [small_prompt_h, large_prompt_h, str(large_min), studio_split.size.y]
 			)
-		if toolbar != null and absf(large_toolbar_h - small_toolbar_h) > 2.0:
+		if chrome != null and absf(large_chrome_h - small_chrome_h) > 2.0:
 			failures.append(
-				"toolbar height changed when composer grew (small=%.1f large=%.1f)"
-				% [small_toolbar_h, large_toolbar_h]
+				"composer chrome height changed when prompt grew (small=%.1f large=%.1f)"
+				% [small_chrome_h, large_chrome_h]
 			)
-		composer_root.custom_minimum_size = Vector2(0, 0)
+		if studio_split.find_child("ComposerActions", true, false) != null:
+			failures.append("ComposerActions must not be inside studio VSplit")
+		prompt_pane.custom_minimum_size = Vector2(0, 0)
 		studio_split.custom_minimum_size = Vector2(0, 0)
 
 	# Studio has no close control; session tabs do.

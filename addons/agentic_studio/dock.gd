@@ -15,7 +15,8 @@ const DEFAULT_SPLIT_OFFSET: int = 220
 var _status_line: Label
 var _tab_bar: TabBar
 var _plus_btn: Button
-var _body_scroll: ScrollContainer
+## Body host fills the dock under the tab row. Not a ScrollContainer — action
+## rows stay pinned; pages scroll inside their own panel.
 var _body_host: MarginContainer
 var _settings_dialog: AcceptDialog
 var _http: HTTPRequest
@@ -50,7 +51,7 @@ var _studio_jobs: Array[AgenticStudioJob] = []
 var _studio_transcript: RefCounted = null  ## AgenticStudioSessionTranscript
 
 # Session tabs: parallel to TabBar indices 1..n
-# Each entry: panel, log, prompt, planner, coder, mode, settings, send, job, title, transcript
+# Each entry: panel, split, log, prompt, planner, coder, mode, settings, send, job, title, transcript
 var _sessions: Array[Dictionary] = []
 var _planner_ids: PackedStringArray = PackedStringArray()
 var _coder_ids: PackedStringArray = PackedStringArray()
@@ -135,20 +136,13 @@ func _build_ui() -> void:
 	_plus_btn.pressed.connect(_on_plus_pressed)
 	tab_row.add_child(_plus_btn)
 
-	_body_scroll = ScrollContainer.new()
-	_body_scroll.name = "BodyScroll"
-	_body_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_body_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_body_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_body_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	root.add_child(_body_scroll)
-
 	_body_host = MarginContainer.new()
+	_body_host.name = "BodyHost"
 	_body_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_body_host.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_body_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_body_host.add_theme_constant_override("margin_top", 2)
 	_body_host.add_theme_constant_override("margin_bottom", 4)
-	_body_scroll.add_child(_body_host)
+	root.add_child(_body_host)
 
 	_studio_panel = _build_studio_panel()
 	_body_host.add_child(_studio_panel)
@@ -159,20 +153,20 @@ func _build_ui() -> void:
 
 
 func _build_studio_panel() -> Control:
+	## Pages (own scroll) + VSplit(log|prompt) + pinned composer chrome.
 	var panel := VBoxContainer.new()
 	panel.name = "StudioPanel"
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# Shrink to content height so BodyScroll can scroll when the dock is short.
-	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.add_theme_constant_override("separation", 4)
 
 	panel.add_child(_build_pages_panel())
 
 	_studio_split = VSplitContainer.new()
 	_studio_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_studio_split.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_studio_split.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_studio_split.size_flags_stretch_ratio = 1.4
-	_studio_split.custom_minimum_size = Vector2(0, 200)
+	_studio_split.custom_minimum_size = Vector2(0, 120)
 	_studio_split.split_offset = _vsplit_offset
 	_studio_split.dragged.connect(_on_split_dragged)
 	panel.add_child(_studio_split)
@@ -195,19 +189,21 @@ func _build_studio_panel() -> Control:
 	_studio_mode = composer["mode"]
 	_studio_settings = composer["settings"]
 	_studio_send = composer["send"]
-	var composer_root: Control = composer["root"] as Control
-	composer_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	composer_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_studio_split.add_child(composer_root)
+	var prompt_host: Control = composer["prompt_host"] as Control
+	_studio_split.add_child(prompt_host)
+	var chrome: Control = composer["chrome"] as Control
+	panel.add_child(chrome)
 	return panel
 
 
 func _build_pages_panel() -> Control:
+	## Header stays fixed; page list + form scroll inside this panel only.
 	var panel := VBoxContainer.new()
-	# No tall floor — narrow/short docks scroll the body instead of clipping actions.
+	panel.name = "PagesPanel"
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.size_flags_stretch_ratio = 0.9
+	panel.custom_minimum_size = Vector2(0, 96)
 	panel.add_theme_constant_override("separation", 4)
 
 	var pages_label := Label.new()
@@ -236,22 +232,32 @@ func _build_pages_panel() -> Control:
 	pages_actions.add_child(new_asset)
 
 	_pages_scroll = ScrollContainer.new()
+	_pages_scroll.name = "PagesScroll"
 	_pages_scroll.custom_minimum_size = Vector2(0, 48)
-	_pages_scroll.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_pages_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pages_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_pages_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_pages_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	panel.add_child(_pages_scroll)
+
+	var pages_inner := VBoxContainer.new()
+	pages_inner.name = "PagesInner"
+	pages_inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pages_inner.add_theme_constant_override("separation", 4)
+	_pages_scroll.add_child(pages_inner)
+
 	_pages_list = VBoxContainer.new()
 	_pages_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_pages_list.add_theme_constant_override("separation", 2)
-	_pages_scroll.add_child(_pages_list)
+	pages_inner.add_child(_pages_list)
 
 	_page_path_label = Label.new()
 	_page_path_label.text = "No page selected"
 	_page_path_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	panel.add_child(_page_path_label)
+	pages_inner.add_child(_page_path_label)
 
 	var title_row := HBoxContainer.new()
-	panel.add_child(title_row)
+	pages_inner.add_child(title_row)
 	var title_l := Label.new()
 	title_l.text = "Title"
 	title_row.add_child(title_l)
@@ -261,7 +267,7 @@ func _build_pages_panel() -> Control:
 	title_row.add_child(_page_title)
 
 	var kind_row := HBoxContainer.new()
-	panel.add_child(kind_row)
+	pages_inner.add_child(kind_row)
 	var kind_l := Label.new()
 	kind_l.text = "Kind"
 	kind_row.add_child(kind_l)
@@ -273,16 +279,16 @@ func _build_pages_panel() -> Control:
 
 	var notes_l := Label.new()
 	notes_l.text = "Notes"
-	panel.add_child(notes_l)
+	pages_inner.add_child(notes_l)
 	_page_notes = TextEdit.new()
 	_page_notes.custom_minimum_size = Vector2(0, 48)
 	_page_notes.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_page_notes.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_page_notes.text_changed.connect(_mark_page_dirty)
-	panel.add_child(_page_notes)
+	pages_inner.add_child(_page_notes)
 
 	var tags_row := HBoxContainer.new()
-	panel.add_child(tags_row)
+	pages_inner.add_child(tags_row)
 	var tags_l := Label.new()
 	tags_l.text = "Tags"
 	tags_row.add_child(tags_l)
@@ -294,10 +300,10 @@ func _build_pages_panel() -> Control:
 
 	var images_l := Label.new()
 	images_l.text = "Images (drop onto character page)"
-	panel.add_child(images_l)
+	pages_inner.add_child(images_l)
 	_page_images = ItemList.new()
 	_page_images.custom_minimum_size = Vector2(0, 36)
-	panel.add_child(_page_images)
+	pages_inner.add_child(_page_images)
 
 	_page_drop = PageDropZoneScript.new()
 	_page_drop.custom_minimum_size = Vector2(0, 32)
@@ -306,37 +312,30 @@ func _build_pages_panel() -> Control:
 	drop_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_page_drop.add_child(drop_label)
 	_page_drop.images_dropped.connect(_on_images_dropped)
-	panel.add_child(_page_drop)
+	pages_inner.add_child(_page_drop)
 
 	var links_l := Label.new()
 	links_l.text = "Links"
-	panel.add_child(links_l)
+	pages_inner.add_child(links_l)
 	_page_links = ItemList.new()
 	_page_links.custom_minimum_size = Vector2(0, 28)
-	panel.add_child(_page_links)
+	pages_inner.add_child(_page_links)
 
 	var save_btn := Button.new()
 	save_btn.text = "Save page"
 	save_btn.pressed.connect(_on_save_page_pressed)
-	panel.add_child(save_btn)
+	pages_inner.add_child(save_btn)
 	return panel
 
 
 func _build_composer(prompt_name: String, send_cb: Callable) -> Dictionary:
-	## Prompt expands; pickers on row 1 (may shrink); Mode/Settings/Send on row 2 (never zero).
-	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 4)
-	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-
-	# Host Control takes VBox expand space; TextEdit fills the host (TextEdit alone
-	# often keeps its min height inside a VBox).
+	## prompt_host goes in the VSplit. chrome (pickers + actions) stays outside
+	## the split and outside any ScrollContainer so it pins to the bottom.
 	var prompt_host := Control.new()
 	prompt_host.name = "PromptHost"
 	prompt_host.custom_minimum_size = Vector2(0, 56)
 	prompt_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	prompt_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_child(prompt_host)
 
 	var prompt := TextEdit.new()
 	prompt.name = prompt_name
@@ -347,14 +346,20 @@ func _build_composer(prompt_name: String, send_cb: Callable) -> Dictionary:
 	prompt.context_menu_enabled = true
 	prompt_host.add_child(prompt)
 
-	# Row 1: Planner + Coder only — may shrink; clipped text + full-name tooltip.
+	var chrome := VBoxContainer.new()
+	chrome.name = "ComposerChrome"
+	chrome.add_theme_constant_override("separation", 4)
+	chrome.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chrome.size_flags_vertical = Control.SIZE_SHRINK_END
+
+	# Row 1: Planner + Coder — may shrink; clipped text + full-name tooltip.
 	var pickers_row := HBoxContainer.new()
 	pickers_row.name = "ComposerPickers"
 	pickers_row.add_theme_constant_override("separation", 4)
 	pickers_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pickers_row.size_flags_vertical = Control.SIZE_SHRINK_END
 	pickers_row.custom_minimum_size = Vector2(0, 28)
-	root.add_child(pickers_row)
+	chrome.add_child(pickers_row)
 
 	var planner_label := Label.new()
 	planner_label.text = "Plan"
@@ -378,14 +383,14 @@ func _build_composer(prompt_name: String, send_cb: Callable) -> Dictionary:
 	coder_picker.item_selected.connect(_on_coder_selected)
 	pickers_row.add_child(coder_picker)
 
-	# Row 2: Mode / Settings / Send — never shares an HBox with the OptionButtons.
+	# Row 2: Mode / Settings / Send — Settings and Send never clip.
 	var actions_row := HBoxContainer.new()
 	actions_row.name = "ComposerActions"
 	actions_row.add_theme_constant_override("separation", 6)
 	actions_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	actions_row.size_flags_vertical = Control.SIZE_SHRINK_END
-	actions_row.custom_minimum_size = Vector2(160, 28)
-	root.add_child(actions_row)
+	actions_row.custom_minimum_size = Vector2(200, 28)
+	chrome.add_child(actions_row)
 
 	var mode_label := Label.new()
 	mode_label.text = "Mode"
@@ -410,8 +415,9 @@ func _build_composer(prompt_name: String, send_cb: Callable) -> Dictionary:
 	settings_btn.tooltip_text = "Settings"
 	settings_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
 	settings_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	settings_btn.custom_minimum_size = Vector2(56, 0)
-	settings_btn.clip_text = true
+	# Wide enough for the full word under the editor theme; never clip.
+	settings_btn.custom_minimum_size = Vector2(84, 0)
+	settings_btn.clip_text = false
 	settings_btn.pressed.connect(_on_settings_pressed)
 	actions_row.add_child(settings_btn)
 
@@ -420,13 +426,14 @@ func _build_composer(prompt_name: String, send_cb: Callable) -> Dictionary:
 	send_btn.tooltip_text = "Send"
 	send_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
 	send_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	send_btn.custom_minimum_size = Vector2(44, 0)
-	send_btn.clip_text = true
+	send_btn.custom_minimum_size = Vector2(52, 0)
+	send_btn.clip_text = false
 	send_btn.pressed.connect(send_cb)
 	actions_row.add_child(send_btn)
 
 	return {
-		"root": root,
+		"prompt_host": prompt_host,
+		"chrome": chrome,
 		"prompt": prompt,
 		"toolbar": actions_row,
 		"pickers_row": pickers_row,
@@ -465,24 +472,32 @@ func _make_session_panel(
 	transcript: RefCounted = null,
 	job: AgenticStudioJob = null
 ) -> Dictionary:
-	var panel := VSplitContainer.new()
+	## Outer VBox fills the dock: VSplit(log|prompt) + pinned chrome. No gap under actions.
+	var panel := VBoxContainer.new()
 	panel.name = "SessionPanel"
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	panel.custom_minimum_size = Vector2(0, 200)
-	panel.split_offset = _vsplit_offset
-	panel.dragged.connect(_on_split_dragged)
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_theme_constant_override("separation", 4)
+
+	var split := VSplitContainer.new()
+	split.name = "SessionSplit"
+	split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	split.custom_minimum_size = Vector2(0, 120)
+	split.split_offset = _vsplit_offset
+	split.dragged.connect(_on_split_dragged)
+	panel.add_child(split)
 
 	var log_view := _make_log_view()
 	log_view.name = "Log"
 	log_view.custom_minimum_size = Vector2(0, 48)
-	panel.add_child(log_view)
+	split.add_child(log_view)
 
 	var composer := _build_composer("SessionPrompt", func() -> void: pass)
-	var composer_root: Control = composer["root"] as Control
-	composer_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	composer_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_child(composer_root)
+	var prompt_host: Control = composer["prompt_host"] as Control
+	split.add_child(prompt_host)
+	var chrome: Control = composer["chrome"] as Control
+	panel.add_child(chrome)
 
 	var tr: RefCounted = transcript
 	if tr == null:
@@ -491,6 +506,7 @@ func _make_session_panel(
 
 	var entry: Dictionary = {
 		"panel": panel,
+		"split": split,
 		"log": log_view,
 		"prompt": composer["prompt"],
 		"planner": composer["planner"],
@@ -591,9 +607,9 @@ func _apply_split_offset_all() -> void:
 	if _studio_split != null:
 		_studio_split.split_offset = _vsplit_offset
 	for entry: Dictionary in _sessions:
-		var panel: VSplitContainer = entry.get("panel") as VSplitContainer
-		if panel != null:
-			panel.split_offset = _vsplit_offset
+		var split: VSplitContainer = entry.get("split") as VSplitContainer
+		if split != null:
+			split.split_offset = _vsplit_offset
 
 
 func _on_tab_selected(tab: int) -> void:
@@ -1757,6 +1773,10 @@ func _handle_tool_call(
 		outcome = await tools.execute_play()
 	elif tool_name == AgenticStudioSceneTools.TOOL_CREATE_ASSET:
 		outcome = await tools.execute_create_asset(args)
+	elif tool_name == AgenticStudioSceneTools.TOOL_IMAGE_GENERATE:
+		outcome = await tools.execute_image_generate(args)
+	elif tool_name == AgenticStudioSceneTools.TOOL_MESH_FROM_IMAGE:
+		outcome = await tools.execute_mesh_from_image(args)
 	elif tool_name == AgenticStudioSceneTools.TOOL_SCREENSHOT:
 		outcome = await tools.execute_screenshot(args)
 	elif tool_name == AgenticStudioSceneTools.TOOL_EDITOR_SCREENSHOT:

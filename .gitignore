@@ -14,6 +14,10 @@ models/weights/
 inbox/
 inbox/**
 
+# Generated images/meshes (keep directory placeholder)
+studio/generated/**
+!studio/generated/.gitkeep
+
 # Job logs and runtime job files (live under user://, but ignore any checked-in copies)
 **/jobs/*.json
 **/jobs/*.log

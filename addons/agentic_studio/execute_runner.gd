@@ -149,6 +149,10 @@ static func _handle_one_tool(
 		outcome = await tools.execute_play()
 	elif tool_name == AgenticStudioSceneTools.TOOL_CREATE_ASSET:
 		outcome = await tools.execute_create_asset(args)
+	elif tool_name == AgenticStudioSceneTools.TOOL_IMAGE_GENERATE:
+		outcome = await tools.execute_image_generate(args)
+	elif tool_name == AgenticStudioSceneTools.TOOL_MESH_FROM_IMAGE:
+		outcome = await tools.execute_mesh_from_image(args)
 	elif tool_name == AgenticStudioSceneTools.TOOL_SCREENSHOT:
 		outcome = await tools.execute_screenshot(args)
 	elif tool_name == AgenticStudioSceneTools.TOOL_EDITOR_SCREENSHOT:

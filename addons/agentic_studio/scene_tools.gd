@@ -5,6 +5,7 @@ extends RefCounted
 const PlaySupportScript = preload("res://addons/agentic_studio/play_support.gd")
 const PageStoreScript = preload("res://addons/agentic_studio/page_store.gd")
 const AssetSupportScript = preload("res://addons/agentic_studio/asset_support.gd")
+const GenerateSupportScript = preload("res://addons/agentic_studio/generate_support.gd")
 const FileSupportScript = preload("res://addons/agentic_studio/file_support.gd")
 const ScreenshotSupportScript = preload("res://addons/agentic_studio/screenshot_support.gd")
 const EditorOpsScript = preload("res://addons/agentic_studio/editor_ops.gd")
@@ -18,6 +19,8 @@ const TOOL_LIST_PAGES: String = "list_pages"
 const TOOL_GET_PAGE: String = "get_page"
 const TOOL_LINK: String = "link"
 const TOOL_CREATE_ASSET: String = "create_asset"
+const TOOL_IMAGE_GENERATE: String = "image_generate"
+const TOOL_MESH_FROM_IMAGE: String = "mesh_from_image"
 const TOOL_LIST_DIR: String = "list_dir"
 const TOOL_READ_FILE: String = "read_file"
 const TOOL_WRITE_FILE: String = "write_file"
@@ -52,6 +55,8 @@ var _page_store: RefCounted = PageStoreScript.new()
 ## Kept alive for UndoRedo do/undo methods on file writes/deletes.
 var _file_store: RefCounted = FileSupportScript.new()
 var _shot_support: RefCounted = ScreenshotSupportScript.new()
+## Kept alive for UndoRedo do/undo on generated page images / files.
+var _generate_store: RefCounted = GenerateSupportScript.new()
 ## Extra editor ops (hierarchy, signals, script_patch, input_map, …).
 var _editor_ops: RefCounted = EditorOpsScript.new()
 
@@ -150,6 +155,76 @@ static func tool_definitions() -> Array:
 						},
 					},
 					"required": ["character", "page_id"],
+					"additionalProperties": false,
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": {
+				"name": TOOL_IMAGE_GENERATE,
+				"description": (
+					"Headless local image generate via Draw Things CLI. Requires page_id. "
+					+ "Writes a PNG under res://studio/generated/<page_id>/ and attaches it to "
+					+ "the page images list in the same undo action. Does not create a scene node. "
+					+ "Fails before spawn if drawthings_cli, models dir, or model filename is unset. "
+					+ "Default size 1024; steps left to the CLI. No cloud, no API key. "
+					+ "Optional reference image path for img2img."
+				),
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"prompt": {
+							"type": "string",
+							"description": "Image prompt text",
+						},
+						"page_id": {
+							"type": "string",
+							"description": "Owning page id/slug/title (e.g. goblin_shaman)",
+						},
+						"reference": {
+							"type": "string",
+							"description": "Optional reference image path (res:// or absolute)",
+						},
+						"image": {
+							"type": "string",
+							"description": "Alias for reference image path",
+						},
+					},
+					"required": ["prompt", "page_id"],
+					"additionalProperties": false,
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": {
+				"name": TOOL_MESH_FROM_IMAGE,
+				"description": (
+					"Confirm-only: decimate and export a mesh file already on the page to "
+					+ "res://studio/generated/<page_id>/*.glb via Blender. Requires page_id. "
+					+ "image path must already be on that page. Does not generate an image and "
+					+ "does not turn a PNG into a sculpt — image-to-mesh is not available. "
+					+ "Fails named if no mesh is on the page or blender_path is missing. "
+					+ "Scene link is a separate resource_assign."
+				),
+				"parameters": {
+					"type": "object",
+					"properties": {
+						"page_id": {
+							"type": "string",
+							"description": "Owning page id/slug/title (e.g. goblin_shaman)",
+						},
+						"image": {
+							"type": "string",
+							"description": "Image path already on the page (must be listed on the page)",
+						},
+						"path": {
+							"type": "string",
+							"description": "Alias for image path already on the page",
+						},
+					},
+					"required": ["page_id", "image"],
 					"additionalProperties": false,
 				},
 			},
@@ -408,6 +483,8 @@ static func is_write_tool(tool_name: String) -> bool:
 		or tool_name == TOOL_SET_PROPERTY
 		or tool_name == TOOL_LINK
 		or tool_name == TOOL_CREATE_ASSET
+		or tool_name == TOOL_IMAGE_GENERATE
+		or tool_name == TOOL_MESH_FROM_IMAGE
 		or tool_name == TOOL_WRITE_FILE
 		or tool_name == TOOL_DELETE_FILE
 	):
@@ -443,6 +520,8 @@ static func is_allowed_tool(tool_name: String) -> bool:
 		or tool_name == TOOL_GET_PAGE
 		or tool_name == TOOL_LINK
 		or tool_name == TOOL_CREATE_ASSET
+		or tool_name == TOOL_IMAGE_GENERATE
+		or tool_name == TOOL_MESH_FROM_IMAGE
 		or tool_name == TOOL_LIST_DIR
 		or tool_name == TOOL_READ_FILE
 		or tool_name == TOOL_WRITE_FILE
@@ -481,6 +560,7 @@ func setup(p_job_id: String, p_session_id: String = "") -> void:
 	_page_store = PageStoreScript.new()
 	_file_store = FileSupportScript.new()
 	_shot_support = ScreenshotSupportScript.new()
+	_generate_store = GenerateSupportScript.new()
 	_editor_ops = EditorOpsScript.new()
 	if _editor_ops.has_method("bind_tools"):
 		_editor_ops.call("bind_tools", self)
@@ -585,6 +665,26 @@ func execute(tool_name: String, args: Dictionary) -> Dictionary:
 				"error": "create_asset requires async execute_create_asset",
 				"log": "create_asset failed: use async path",
 				"result": {"ok": false, "error": "create_asset requires async execute_create_asset"},
+			}
+		TOOL_IMAGE_GENERATE:
+			return {
+				"ok": false,
+				"blocked": false,
+				"skipped": false,
+				"wrote": false,
+				"error": "image_generate requires async execute_image_generate",
+				"log": "image_generate failed: use async path",
+				"result": {"ok": false, "error": "image_generate requires async execute_image_generate"},
+			}
+		TOOL_MESH_FROM_IMAGE:
+			return {
+				"ok": false,
+				"blocked": false,
+				"skipped": false,
+				"wrote": false,
+				"error": "mesh_from_image requires async execute_mesh_from_image",
+				"log": "mesh_from_image failed: use async path",
+				"result": {"ok": false, "error": "mesh_from_image requires async execute_mesh_from_image"},
 			}
 		TOOL_LIST_PAGES:
 			return _list_pages()
@@ -897,6 +997,225 @@ func execute_create_asset(args: Dictionary) -> Dictionary:
 		"wrote": true,
 		"error": "",
 		"log": "\n".join(log_lines),
+		"result": payload,
+	}
+
+
+func execute_image_generate(args: Dictionary) -> Dictionary:
+	## Allow: Draw Things CLI → PNG under generated/<page_id>/ + page images. No scene node.
+	_record_op(TOOL_IMAGE_GENERATE, args)
+	var capped: Dictionary = _refuse_if_write_capped(TOOL_IMAGE_GENERATE)
+	if not capped.is_empty():
+		return capped
+	var page_res: Dictionary = _require_page_id(str(args.get("page_id", "")))
+	if not bool(page_res.get("ok", false)):
+		return _page_id_failure(
+			"image_generate", str(page_res.get("error", "page_id required"))
+		)
+	var page_id: String = str(page_res.get("page_id", ""))
+	var page_path: String = str(page_res.get("path", ""))
+	var prompt: String = str(args.get("prompt", "")).strip_edges()
+	var reference: String = str(
+		args.get("reference", args.get("image", args.get("reference_image", "")))
+	).strip_edges()
+
+	# Fail before spawn when settings are incomplete.
+	var settings: Dictionary = GenerateSupportScript.validate_drawthings_settings()
+	if not bool(settings.get("ok", false)):
+		var err_s: String = str(settings.get("error", "drawthings settings incomplete"))
+		return {
+			"ok": false,
+			"blocked": false,
+			"skipped": false,
+			"wrote": false,
+			"error": err_s,
+			"log": "image_generate failed: %s" % err_s,
+			"result": {"ok": false, "error": err_s},
+		}
+
+	var scene_root: Node = null
+	var child_count_before: int = -1
+	if Engine.is_editor_hint():
+		scene_root = EditorInterface.get_edited_scene_root()
+		if scene_root != null:
+			child_count_before = scene_root.get_child_count()
+
+	var generated: Dictionary = GenerateSupportScript.run_image_generate(
+		prompt, page_id, reference
+	)
+	if not bool(generated.get("ok", false)):
+		var err_g: String = str(generated.get("error", "generate failed"))
+		var stdout: String = str(generated.get("stdout", "")).strip_edges()
+		if not stdout.is_empty():
+			err_g = "%s | %s" % [err_g, stdout]
+		return {
+			"ok": false,
+			"blocked": false,
+			"skipped": false,
+			"wrote": false,
+			"error": err_g,
+			"log": "image_generate failed: %s" % err_g,
+			"result": {"ok": false, "error": err_g},
+		}
+	var out_path: String = str(generated.get("path", ""))
+	var attached: Dictionary = GenerateSupportScript.attach_image_to_page(page_path, out_path)
+	if not bool(attached.get("ok", false)):
+		# Best-effort cleanup of orphan PNG.
+		_generate_store.call("delete_generated_file", out_path)
+		var err_a: String = str(attached.get("error", "attach failed"))
+		return {
+			"ok": false,
+			"blocked": false,
+			"skipped": false,
+			"wrote": false,
+			"error": err_a,
+			"log": "image_generate failed: %s" % err_a,
+			"result": {"ok": false, "error": err_a, "path": out_path},
+		}
+	var previous: PackedStringArray = PackedStringArray(attached.get("previous", PackedStringArray()))
+	var next_images: PackedStringArray = previous.duplicate()
+	if not next_images.has(out_path):
+		next_images.append(out_path)
+
+	_ensure_action()
+	var ur: EditorUndoRedoManager = EditorInterface.get_editor_undo_redo()
+	ur.add_do_method(_generate_store, "apply_page_images", page_path, next_images)
+	ur.add_undo_method(_generate_store, "restore_page_images", page_path, previous)
+	ur.add_undo_method(_generate_store, "delete_generated_file", out_path)
+	ur.add_do_reference(_generate_store)
+	_note_page(page_id)
+	_note_write(false)  # page data only — not a scene write / play gate
+	_ops_log_set_output(out_path)
+
+	if scene_root != null and child_count_before >= 0 \
+			and scene_root.get_child_count() != child_count_before:
+		push_warning("AgenticStudio image_generate: scene child count changed unexpectedly")
+
+	if EditorInterface.get_resource_filesystem() != null:
+		EditorInterface.get_resource_filesystem().update_file(out_path)
+
+	var payload: Dictionary = {
+		"ok": true,
+		"path": out_path,
+		"page_id": page_id,
+		"page_path": page_path,
+	}
+	return {
+		"ok": true,
+		"blocked": false,
+		"skipped": false,
+		"wrote": true,
+		"error": "",
+		"log": "image_generate ok path=%s page_id=%s" % [out_path, page_id],
+		"result": payload,
+	}
+
+
+func execute_mesh_from_image(args: Dictionary) -> Dictionary:
+	## Confirm: decimate/export an existing mesh on the page. Never PNG→sculpt.
+	_record_op(TOOL_MESH_FROM_IMAGE, args)
+	var capped: Dictionary = _refuse_if_write_capped(TOOL_MESH_FROM_IMAGE)
+	if not capped.is_empty():
+		return capped
+	var page_res: Dictionary = _require_page_id(str(args.get("page_id", "")))
+	if not bool(page_res.get("ok", false)):
+		return _page_id_failure(
+			"mesh_from_image", str(page_res.get("error", "page_id required"))
+		)
+	var page_id: String = str(page_res.get("page_id", ""))
+	var page_path: String = str(page_res.get("path", ""))
+	var image_path: String = str(args.get("image", args.get("path", ""))).strip_edges()
+	if image_path.is_empty():
+		return {
+			"ok": false,
+			"blocked": false,
+			"skipped": false,
+			"wrote": false,
+			"error": "image path is required",
+			"log": "mesh_from_image failed: image path is required",
+			"result": {"ok": false, "error": "image path is required"},
+		}
+	var page: Resource = PageStoreScript.load_page(page_path)
+	if page == null:
+		return {
+			"ok": false,
+			"blocked": false,
+			"skipped": false,
+			"wrote": false,
+			"error": "page not found: %s" % page_path,
+			"log": "mesh_from_image failed: page not found",
+			"result": {"ok": false, "error": "page not found"},
+		}
+	if not GenerateSupportScript.page_has_image(page, image_path):
+		var err_img: String = "image path is not on page: %s" % image_path
+		return {
+			"ok": false,
+			"blocked": false,
+			"skipped": false,
+			"wrote": false,
+			"error": err_img,
+			"log": "mesh_from_image failed: %s" % err_img,
+			"result": {"ok": false, "error": err_img},
+		}
+
+	var mesh_find: Dictionary = GenerateSupportScript.find_mesh_on_page(page)
+	if not bool(mesh_find.get("ok", false)):
+		var err_m: String = str(
+			mesh_find.get("error", "no mesh on page yet — image-to-mesh is not available")
+		)
+		return {
+			"ok": false,
+			"blocked": false,
+			"skipped": false,
+			"wrote": false,
+			"error": err_m,
+			"log": "mesh_from_image failed: %s" % err_m,
+			"result": {"ok": false, "error": err_m},
+		}
+
+	var exported: Dictionary = GenerateSupportScript.decimate_export_mesh(
+		str(mesh_find.get("path", "")), page_id
+	)
+	if not bool(exported.get("ok", false)):
+		var err_e: String = str(exported.get("error", "export failed"))
+		return {
+			"ok": false,
+			"blocked": false,
+			"skipped": false,
+			"wrote": false,
+			"error": err_e,
+			"log": "mesh_from_image failed: %s" % err_e,
+			"result": {"ok": false, "error": err_e},
+		}
+	var out_glb: String = str(exported.get("path", ""))
+
+	_ensure_action()
+	var ur: EditorUndoRedoManager = EditorInterface.get_editor_undo_redo()
+	# File already written; undo deletes the exported glb. Do method is a no-op keep.
+	ur.add_do_method(_generate_store, "apply_page_images", page_path, PackedStringArray(page.get("image_paths")))
+	ur.add_undo_method(_generate_store, "delete_generated_file", out_glb)
+	ur.add_do_reference(_generate_store)
+	_note_page(page_id)
+	_note_write(false)
+	_ops_log_set_output(out_glb)
+
+	if EditorInterface.get_resource_filesystem() != null:
+		EditorInterface.get_resource_filesystem().update_file(out_glb)
+
+	var payload: Dictionary = {
+		"ok": true,
+		"path": out_glb,
+		"page_id": page_id,
+		"source_mesh": str(mesh_find.get("path", "")),
+		"image": image_path,
+	}
+	return {
+		"ok": true,
+		"blocked": false,
+		"skipped": false,
+		"wrote": true,
+		"error": "",
+		"log": "mesh_from_image ok path=%s page_id=%s" % [out_glb, page_id],
 		"result": payload,
 	}
 
@@ -1531,10 +1850,26 @@ func _record_op(tool_name: String, args: Dictionary) -> void:
 			summary["class"] = cls
 		ops_log.append(summary)
 		return
-	for key: String in ["page_id", "path", "name", "type", "property", "character", "from", "to", "target", "class"]:
+	for key: String in [
+		"page_id", "path", "name", "type", "property", "character", "from", "to",
+		"target", "class", "image", "prompt",
+	]:
 		if args.has(key):
+			# Never record raw prompt text beyond a short marker — keep page_id + op.
+			if key == "prompt":
+				continue
 			summary[key] = args[key]
 	ops_log.append(summary)
+
+
+func _ops_log_set_output(output_path: String) -> void:
+	## Attach output path to the last op summary for session jsonl (never a key).
+	if ops_log.is_empty() or output_path.strip_edges().is_empty():
+		return
+	var last: Variant = ops_log[ops_log.size() - 1]
+	if typeof(last) != TYPE_DICTIONARY:
+		return
+	(last as Dictionary)["path"] = output_path.strip_edges()
 
 
 func _node_snapshot_has_property(node: Node, property: String) -> bool:

@@ -23,9 +23,11 @@ RUN_SYSTEM = (
     "Local class knowledge is only Node3D, MeshInstance3D, CollisionShape3D, Camera3D, "
     "and the cited page script; everything else uses class_get (one class). "
     "Allowed write tools: add_node, set_property, node_duplicate, node_rename, "
-    "node_reparent, node_move, signal_connect, resource_assign. "
+    "node_reparent, node_move, signal_connect, resource_assign, image_generate. "
     "Confirm-only (plugin will return needs_confirm unless confirmed): "
-    "script_patch, script_attach, input_map_ensure, write_file, delete_file. "
+    "script_patch, script_attach, input_map_ensure, write_file, delete_file, mesh_from_image. "
+    "image_generate writes a PNG onto the page (no scene node). "
+    "mesh_from_image only decimates/exports a mesh already on the page — not PNG-to-sculpt. "
     "add_node arguments MUST use keys type, name, page_id "
     '(example: {"tool":"add_node","arguments":{"type":"Node3D","name":"HarnessMarker","page_id":"goblin_shaman"}}). '
     "set_property arguments MUST use keys path, property, value, page_id; "
