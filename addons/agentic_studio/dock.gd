@@ -15,6 +15,7 @@ const DEFAULT_SPLIT_OFFSET: int = 220
 var _status_line: Label
 var _tab_bar: TabBar
 var _plus_btn: Button
+var _body_scroll: ScrollContainer
 var _body_host: MarginContainer
 var _settings_dialog: AcceptDialog
 var _http: HTTPRequest
@@ -91,14 +92,24 @@ func _build_ui() -> void:
 	_status_line.text = "No model selected"
 	_status_line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status_line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status_line.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_status_line.clip_text = true
 	root.add_child(_status_line)
 
+	# Tab row stays outside the body scroll so Studio / + stay reachable.
 	var tab_row := HBoxContainer.new()
+	tab_row.name = "TabRow"
 	tab_row.add_theme_constant_override("separation", 4)
+	tab_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tab_row.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	tab_row.custom_minimum_size = Vector2(0, 28)
 	root.add_child(tab_row)
 
 	_tab_bar = TabBar.new()
 	_tab_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_tab_bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_tab_bar.scrolling_enabled = true
+	_tab_bar.clip_tabs = false
 	_tab_bar.tab_changed.connect(_on_tab_selected)
 	# Built-in close on every tab would put an X on Studio. Use never + a
 	# custom tab button only on session tabs so Studio has no close control.
@@ -113,17 +124,31 @@ func _build_ui() -> void:
 	_tab_context_menu.id_pressed.connect(_on_tab_context_id_pressed)
 	add_child(_tab_context_menu)
 
+	# Own non-shrinking slot — never collapse to zero beside a crowded TabBar.
 	_plus_btn = Button.new()
 	_plus_btn.text = "+"
 	_plus_btn.tooltip_text = "New session"
+	_plus_btn.focus_mode = Control.FOCUS_NONE
+	_plus_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
+	_plus_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_plus_btn.custom_minimum_size = Vector2(28, 28)
 	_plus_btn.pressed.connect(_on_plus_pressed)
 	tab_row.add_child(_plus_btn)
 
+	_body_scroll = ScrollContainer.new()
+	_body_scroll.name = "BodyScroll"
+	_body_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_body_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_body_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_body_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	root.add_child(_body_scroll)
+
 	_body_host = MarginContainer.new()
 	_body_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_body_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_body_host.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_body_host.add_theme_constant_override("margin_top", 2)
-	root.add_child(_body_host)
+	_body_host.add_theme_constant_override("margin_bottom", 4)
+	_body_scroll.add_child(_body_host)
 
 	_studio_panel = _build_studio_panel()
 	_body_host.add_child(_studio_panel)
@@ -137,15 +162,17 @@ func _build_studio_panel() -> Control:
 	var panel := VBoxContainer.new()
 	panel.name = "StudioPanel"
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	# Shrink to content height so BodyScroll can scroll when the dock is short.
+	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	panel.add_theme_constant_override("separation", 4)
 
 	panel.add_child(_build_pages_panel())
 
 	_studio_split = VSplitContainer.new()
 	_studio_split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_studio_split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_studio_split.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_studio_split.size_flags_stretch_ratio = 1.4
+	_studio_split.custom_minimum_size = Vector2(0, 200)
 	_studio_split.split_offset = _vsplit_offset
 	_studio_split.dragged.connect(_on_split_dragged)
 	panel.add_child(_studio_split)
@@ -177,30 +204,40 @@ func _build_studio_panel() -> Control:
 
 func _build_pages_panel() -> Control:
 	var panel := VBoxContainer.new()
-	panel.custom_minimum_size = Vector2(0, 140)
+	# No tall floor — narrow/short docks scroll the body instead of clipping actions.
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	panel.size_flags_stretch_ratio = 0.9
 	panel.add_theme_constant_override("separation", 4)
 
-	var header := HBoxContainer.new()
-	panel.add_child(header)
 	var pages_label := Label.new()
 	pages_label.text = "Pages"
 	pages_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(pages_label)
+	panel.add_child(pages_label)
+
+	# Second row so + Character / + Asset stay visible under ~280px width.
+	var pages_actions := HBoxContainer.new()
+	pages_actions.add_theme_constant_override("separation", 4)
+	pages_actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_child(pages_actions)
 	var new_char := Button.new()
-	new_char.text = "+ Character"
+	new_char.text = "+ Char"
+	new_char.tooltip_text = "New character page"
+	new_char.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	new_char.clip_text = true
 	new_char.pressed.connect(_on_new_character_pressed)
-	header.add_child(new_char)
+	pages_actions.add_child(new_char)
 	var new_asset := Button.new()
 	new_asset.text = "+ Asset"
+	new_asset.tooltip_text = "New asset page"
+	new_asset.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	new_asset.clip_text = true
 	new_asset.pressed.connect(_on_new_asset_pressed)
-	header.add_child(new_asset)
+	pages_actions.add_child(new_asset)
 
 	_pages_scroll = ScrollContainer.new()
-	_pages_scroll.custom_minimum_size = Vector2(0, 72)
-	_pages_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_pages_scroll.custom_minimum_size = Vector2(0, 48)
+	_pages_scroll.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_pages_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	panel.add_child(_pages_scroll)
 	_pages_list = VBoxContainer.new()
@@ -239,7 +276,7 @@ func _build_pages_panel() -> Control:
 	panel.add_child(notes_l)
 	_page_notes = TextEdit.new()
 	_page_notes.custom_minimum_size = Vector2(0, 48)
-	_page_notes.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_page_notes.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_page_notes.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_page_notes.text_changed.connect(_mark_page_dirty)
 	panel.add_child(_page_notes)
@@ -286,7 +323,7 @@ func _build_pages_panel() -> Control:
 
 
 func _build_composer(prompt_name: String, send_cb: Callable) -> Dictionary:
-	## Prompt TextEdit expands with the split; Model/Mode/Settings/Send stay a fixed bottom row.
+	## Prompt expands; pickers on row 1 (may shrink); Mode/Settings/Send on row 2 (never zero).
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 4)
 	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -296,7 +333,7 @@ func _build_composer(prompt_name: String, send_cb: Callable) -> Dictionary:
 	# often keeps its min height inside a VBox).
 	var prompt_host := Control.new()
 	prompt_host.name = "PromptHost"
-	prompt_host.custom_minimum_size = Vector2(0, 72)
+	prompt_host.custom_minimum_size = Vector2(0, 56)
 	prompt_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	prompt_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(prompt_host)
@@ -310,70 +347,105 @@ func _build_composer(prompt_name: String, send_cb: Callable) -> Dictionary:
 	prompt.context_menu_enabled = true
 	prompt_host.add_child(prompt)
 
-	var toolbar := HBoxContainer.new()
-	toolbar.name = "ComposerToolbar"
-	toolbar.add_theme_constant_override("separation", 6)
-	toolbar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	toolbar.size_flags_vertical = Control.SIZE_SHRINK_END
-	# Fixed one-line row: do not expand when the split grows.
-	toolbar.custom_minimum_size = Vector2(0, 0)
-	root.add_child(toolbar)
+	# Row 1: Planner + Coder only — may shrink; clipped text + full-name tooltip.
+	var pickers_row := HBoxContainer.new()
+	pickers_row.name = "ComposerPickers"
+	pickers_row.add_theme_constant_override("separation", 4)
+	pickers_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pickers_row.size_flags_vertical = Control.SIZE_SHRINK_END
+	pickers_row.custom_minimum_size = Vector2(0, 28)
+	root.add_child(pickers_row)
 
 	var planner_label := Label.new()
-	planner_label.text = "Planner"
-	toolbar.add_child(planner_label)
+	planner_label.text = "Plan"
+	planner_label.tooltip_text = "Planner"
+	planner_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	pickers_row.add_child(planner_label)
 
 	var planner_picker := OptionButton.new()
-	planner_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	planner_picker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_configure_role_picker(planner_picker)
 	planner_picker.item_selected.connect(_on_planner_selected)
-	toolbar.add_child(planner_picker)
+	pickers_row.add_child(planner_picker)
 
 	var coder_label := Label.new()
-	coder_label.text = "Coder"
-	toolbar.add_child(coder_label)
+	coder_label.text = "Code"
+	coder_label.tooltip_text = "Coder"
+	coder_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	pickers_row.add_child(coder_label)
 
 	var coder_picker := OptionButton.new()
-	coder_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	coder_picker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_configure_role_picker(coder_picker)
 	coder_picker.item_selected.connect(_on_coder_selected)
-	toolbar.add_child(coder_picker)
+	pickers_row.add_child(coder_picker)
+
+	# Row 2: Mode / Settings / Send — never shares an HBox with the OptionButtons.
+	var actions_row := HBoxContainer.new()
+	actions_row.name = "ComposerActions"
+	actions_row.add_theme_constant_override("separation", 6)
+	actions_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	actions_row.size_flags_vertical = Control.SIZE_SHRINK_END
+	actions_row.custom_minimum_size = Vector2(160, 28)
+	root.add_child(actions_row)
 
 	var mode_label := Label.new()
 	mode_label.text = "Mode"
-	toolbar.add_child(mode_label)
+	mode_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	actions_row.add_child(mode_label)
 
 	var mode_picker := OptionButton.new()
+	mode_picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mode_picker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	mode_picker.custom_minimum_size = Vector2(72, 0)
+	mode_picker.clip_text = true
+	mode_picker.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	mode_picker.add_item("Plan", 0)
 	mode_picker.add_item("Run", 1)
 	mode_picker.add_item("Auto-approve", 2)
 	mode_picker.select(0)
 	mode_picker.item_selected.connect(func(_i: int) -> void: _update_status_line())
-	toolbar.add_child(mode_picker)
+	actions_row.add_child(mode_picker)
 
 	var settings_btn := Button.new()
 	settings_btn.text = "Settings"
+	settings_btn.tooltip_text = "Settings"
+	settings_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
 	settings_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	settings_btn.custom_minimum_size = Vector2(56, 0)
+	settings_btn.clip_text = true
 	settings_btn.pressed.connect(_on_settings_pressed)
-	toolbar.add_child(settings_btn)
+	actions_row.add_child(settings_btn)
 
 	var send_btn := Button.new()
 	send_btn.text = "Send"
+	send_btn.tooltip_text = "Send"
+	send_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
 	send_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	send_btn.custom_minimum_size = Vector2(44, 0)
+	send_btn.clip_text = true
 	send_btn.pressed.connect(send_cb)
-	toolbar.add_child(send_btn)
+	actions_row.add_child(send_btn)
 
 	return {
 		"root": root,
 		"prompt": prompt,
-		"toolbar": toolbar,
+		"toolbar": actions_row,
+		"pickers_row": pickers_row,
+		"actions_row": actions_row,
 		"planner": planner_picker,
 		"coder": coder_picker,
 		"mode": mode_picker,
 		"settings": settings_btn,
 		"send": send_btn,
 	}
+
+
+func _configure_role_picker(picker: OptionButton) -> void:
+	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	picker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	picker.custom_minimum_size = Vector2(48, 0)
+	picker.clip_text = true
+	picker.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	picker.fit_to_longest_item = false
 
 
 func _make_log_view() -> TextEdit:
@@ -396,7 +468,8 @@ func _make_session_panel(
 	var panel := VSplitContainer.new()
 	panel.name = "SessionPanel"
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	panel.custom_minimum_size = Vector2(0, 200)
 	panel.split_offset = _vsplit_offset
 	panel.dragged.connect(_on_split_dragged)
 
@@ -1247,6 +1320,7 @@ func _on_planner_selected(index: int) -> void:
 	else:
 		AgenticStudioConfig.set_selected_planner_id(_planner_ids[index - 1])
 	_sync_role_pickers_to_config()
+	_refresh_all_picker_tooltips()
 	_update_status_line()
 
 
@@ -1258,7 +1332,16 @@ func _on_coder_selected(index: int) -> void:
 	else:
 		AgenticStudioConfig.set_selected_coder_id(_coder_ids[index - 1])
 	_sync_role_pickers_to_config()
+	_refresh_all_picker_tooltips()
 	_update_status_line()
+
+
+func _refresh_all_picker_tooltips() -> void:
+	_update_role_picker_tooltip(_studio_planner)
+	_update_role_picker_tooltip(_studio_coder)
+	for entry: Dictionary in _sessions:
+		_update_role_picker_tooltip(entry.get("planner") as OptionButton)
+		_update_role_picker_tooltip(entry.get("coder") as OptionButton)
 
 
 func _fill_role_pickers(planner_picker: OptionButton, coder_picker: OptionButton) -> void:
@@ -1288,18 +1371,36 @@ func _fill_one_role_picker(
 ) -> void:
 	picker.clear()
 	picker.add_item("None", 0)
+	picker.set_item_metadata(0, "")
 	var select_index: int = 0
 	var models: Array[Dictionary] = AgenticStudioConfig.list_models_for_role(role)
 	for i: int in range(models.size()):
 		var model: Dictionary = models[i]
 		var id: String = str(model.get("id", ""))
 		ids_out.append(id)
+		var display: String = str(model.get("display_name", id))
 		var kind: String = str(model.get("kind", "local"))
-		var label: String = "%s (%s)" % [str(model.get("display_name", id)), kind]
+		var label: String = "%s (%s)" % [display, kind]
 		picker.add_item(label, i + 1)
+		picker.set_item_metadata(i + 1, display)
 		if id == selected_id:
 			select_index = i + 1
 	picker.select(select_index)
+	_update_role_picker_tooltip(picker)
+
+
+func _update_role_picker_tooltip(picker: OptionButton) -> void:
+	if picker == null:
+		return
+	var idx: int = picker.selected
+	if idx < 0 or idx >= picker.item_count:
+		picker.tooltip_text = ""
+		return
+	var meta: Variant = picker.get_item_metadata(idx)
+	if typeof(meta) == TYPE_STRING and not str(meta).is_empty():
+		picker.tooltip_text = str(meta)
+	else:
+		picker.tooltip_text = picker.get_item_text(idx)
 
 
 func _refresh_all_model_pickers() -> void:
@@ -1328,6 +1429,7 @@ func _sync_role_pickers_to_config() -> void:
 		(entry["planner"] as OptionButton).select(planner_i)
 		(entry["coder"] as OptionButton).select(coder_i)
 	_suppress_picker_signal = false
+	_refresh_all_picker_tooltips()
 
 
 func _update_status_line() -> void:
